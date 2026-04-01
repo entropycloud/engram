@@ -169,3 +169,47 @@ class ScanVerdict(BaseModel):
 
     action: Literal["allow", "warn", "block"]
     results: list[ScanResult] = Field(default_factory=list)
+
+
+class TransitionProposal(BaseModel):
+    """Proposed state transition for an engram."""
+
+    slug: str
+    current_state: EngramState
+    target_state: EngramState
+    reason: str
+
+
+class DedupCandidate(BaseModel):
+    """A potential duplicate engram."""
+
+    slug: str
+    similarity_type: Literal["tag_overlap", "description_similarity"]
+    similarity_score: float
+    description: str
+
+
+class GCReport(BaseModel):
+    """Report from garbage collection run."""
+
+    archived: list[str] = Field(default_factory=list)
+    orphan_metrics_cleaned: list[str] = Field(default_factory=list)
+    orphan_versions_cleaned: list[str] = Field(default_factory=list)
+
+
+class SessionContext(BaseModel):
+    """Context for the current session, used by the Selector for matching."""
+
+    project_path: str | None = None
+    files: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    prompt: str = ""
+
+
+class ScoredEngram(BaseModel):
+    """An engram with a computed relevance score."""
+
+    slug: str
+    engram: Engram
+    score: float
+    match_reasons: list[str] = Field(default_factory=list)

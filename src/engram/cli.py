@@ -10,8 +10,10 @@ from engram import __version__
 from engram.evaluator import EngramEvaluator
 from engram.formatting import format_engram_detail, format_engram_table
 from engram.hooks import record_feedback, record_signal
-from engram.models import EngramState
+from engram.lifecycle import LifecycleManager
+from engram.models import EngramState, SessionContext
 from engram.scanner import EngramScanner
+from engram.selector import EngramSelector
 from engram.store import EngramStore
 
 # Default store paths
@@ -186,3 +188,179 @@ def scan(ctx: click.Context, slug: str) -> None:
 
     if verdict.action == "block":
         ctx.exit(1)
+
+
+# ------------------------------------------------------------------
+# Selector command
+# ------------------------------------------------------------------
+
+
+@main.command("select")
+@click.option("--prompt", "prompt_text", default="", help="Prompt text to match against.")
+@click.option("--project", "project_path", default=None, help="Project path.")
+@click.option("--file", "files", multiple=True, help="File paths in context.")
+@click.option("--tag", "tags", multiple=True, help="Context tags.")
+@click.option("--output", "output_path", type=click.Path(path_type=Path), default=None,
+              help="Write injection output to file instead of stdout.")
+@click.pass_context
+def select_cmd(ctx: click.Context, prompt_text: str, project_path: str | None,
+               files: tuple[str, ...], tags: tuple[str, ...],
+               output_path: Path | None) -> None:
+    """Select relevant engrams for the current context."""
+    store = _get_store(ctx.obj["store_path"])
+    context = SessionContext(
+        project_path=project_path,
+        files=list(files),
+        tags=list(tags),
+        prompt=prompt_text,
+    )
+    selector = EngramSelector(store)
+    scored = selector.select(context)
+    output = selector.format_injection(scored)
+
+    if output_path is not None:
+        output_path.write_text(output, encoding="utf-8")
+        click.echo(f"Wrote {len(scored)} engram(s) to {output_path}")
+    else:
+        if output:
+            click.echo(output)
+        else:
+            click.echo("No matching engrams found.")
+
+
+# ------------------------------------------------------------------
+# Lifecycle commands
+# ------------------------------------------------------------------
+
+_PROMOTE_MAP: dict[EngramState, EngramState] = {
+    EngramState.DRAFT: EngramState.CANDIDATE,
+    EngramState.CANDIDATE: EngramState.STABLE,
+}
+
+
+@main.command()
+@click.argument("slug")
+@click.pass_context
+def promote(ctx: click.Context, slug: str) -> None:
+    """Promote an engram to the next lifecycle state."""
+    store = _get_store(ctx.obj["store_path"])
+    try:
+        engram = store.read(slug)
+    except FileNotFoundError:
+        raise click.ClickException(f"Engram not found: {slug}") from None
+
+    target = _PROMOTE_MAP.get(engram.state)
+    if target is None:
+        raise click.ClickException(
+            f"Cannot promote engram in state '{engram.state.value}'"
+        ) from None
+
+    scanner = EngramScanner()
+    lm = LifecycleManager(store, scanner=scanner)
+    try:
+        result = lm.apply_transition(slug, target, "promoted via CLI")
+    except ValueError as e:
+        raise click.ClickException(str(e)) from None
+    click.echo(f"Promoted {slug} to {result.state.value}")
+
+
+@main.command()
+@click.argument("slug")
+@click.pass_context
+def deprecate(ctx: click.Context, slug: str) -> None:
+    """Move an engram to deprecated state."""
+    store = _get_store(ctx.obj["store_path"])
+    lm = LifecycleManager(store)
+    try:
+        result = lm.apply_transition(slug, EngramState.DEPRECATED, "deprecated via CLI")
+    except (FileNotFoundError, ValueError) as e:
+        raise click.ClickException(str(e)) from None
+    click.echo(f"Deprecated {slug} (now {result.state.value})")
+
+
+@main.command()
+@click.argument("slug")
+@click.pass_context
+def archive(ctx: click.Context, slug: str) -> None:
+    """Move an engram to archived state."""
+    store = _get_store(ctx.obj["store_path"])
+    lm = LifecycleManager(store)
+    try:
+        result = lm.apply_transition(slug, EngramState.ARCHIVED, "archived via CLI")
+    except (FileNotFoundError, ValueError) as e:
+        raise click.ClickException(str(e)) from None
+    click.echo(f"Archived {slug} (now {result.state.value})")
+
+
+@main.command()
+@click.argument("slug")
+@click.pass_context
+def demote(ctx: click.Context, slug: str) -> None:
+    """Reset an engram to draft state for rework."""
+    store = _get_store(ctx.obj["store_path"])
+    lm = LifecycleManager(store)
+    try:
+        result = lm.apply_transition(slug, EngramState.DRAFT, "demoted via CLI")
+    except (FileNotFoundError, ValueError) as e:
+        raise click.ClickException(str(e)) from None
+    click.echo(f"Demoted {slug} to {result.state.value}")
+
+
+@main.command()
+@click.argument("slug")
+@click.argument("version", type=int)
+@click.pass_context
+def rollback(ctx: click.Context, slug: str, version: int) -> None:
+    """Rollback an engram to a previous version."""
+    store = _get_store(ctx.obj["store_path"])
+    lm = LifecycleManager(store)
+    try:
+        result = lm.rollback(slug, version)
+    except FileNotFoundError as e:
+        raise click.ClickException(str(e)) from None
+    click.echo(f"Rolled back {slug} to v{version} (now v{result.version})")
+
+
+@main.command()
+@click.pass_context
+def gc(ctx: click.Context) -> None:
+    """Run garbage collection."""
+    store = _get_store(ctx.obj["store_path"])
+    lm = LifecycleManager(store)
+    report = lm.run_gc()
+    if report.archived:
+        click.echo(f"Archived: {', '.join(report.archived)}")
+    if report.orphan_metrics_cleaned:
+        click.echo(f"Orphan metrics cleaned: {', '.join(report.orphan_metrics_cleaned)}")
+    if report.orphan_versions_cleaned:
+        click.echo(f"Orphan versions cleaned: {', '.join(report.orphan_versions_cleaned)}")
+    total = (
+        len(report.archived)
+        + len(report.orphan_metrics_cleaned)
+        + len(report.orphan_versions_cleaned)
+    )
+    click.echo(f"GC complete: {total} item(s) cleaned")
+
+
+@main.command()
+@click.argument("slug")
+@click.pass_context
+def dedup(ctx: click.Context, slug: str) -> None:
+    """Show deduplication candidates for an engram."""
+    store = _get_store(ctx.obj["store_path"])
+    try:
+        engram = store.read(slug)
+    except FileNotFoundError:
+        raise click.ClickException(f"Engram not found: {slug}") from None
+
+    lm = LifecycleManager(store)
+    candidates = lm.check_duplicates(engram)
+    if not candidates:
+        click.echo(f"No duplicates found for {slug}")
+        return
+    click.echo(f"Potential duplicates for {slug}:")
+    for c in candidates:
+        click.echo(
+            f"  {c.slug} ({c.similarity_type}: {c.similarity_score:.2f}) "
+            f"— {c.description}"
+        )
