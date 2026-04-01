@@ -29,17 +29,17 @@ Engrams are created automatically when the agent discovers non-trivial approache
 |           +----------+------------+--------------------+         |
 |                      |                                           |
 |                      v                                           |
-|  +------------------------------------------------------------+ |
-|  |                    Context Assembly                         | |
-|  |  (what the agent sees at the start of each turn)           | |
-|  +------------------------------------------------------------+ |
+|  +------------------------------------------------------------+  |
+|  |                    Context Assembly                        |  |
+|  |  (what the agent sees at the start of each turn)           |  |
+|  +------------------------------------------------------------+  |
 |           ^                       ^                    ^         |
 |           |                       |                    |         |
-|  +--------+--------+    +--------+--------+   +-------+-------+ |
-|  | Engram Selector  |    | Engram Reviewer |   | Signal        | |
-|  | (reads engrams,  |    | (creates/updates|   | Collector     | |
-|  |  injects relevant|    |  engrams after  |   | (hooks into   | |
-|  |  ones into ctx)  |    |  sessions)      |   |  tool use)    | |
+|  +--------+--------+    +--------+--------+   +-------+-------+  |
+|  | Engram Selector  |    | Engram Reviewer |   | Signal       |  |
+|  | (reads engrams,  |    | (creates/updates|   | Collector    |  |
+|  |  injects relevant|    |  engrams after  |   | (hooks into  |  |
+|  |  ones into ctx)  |    |  sessions)      |   |  tool use)   |  |
 |  +---------+--------+    +--------+--------+   +-------+-------+ |
 |            |                      |                    |         |
 +------------------------------------------------------------------+
