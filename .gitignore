@@ -37,3 +37,4 @@ Thumbs.db
 review.log
 rejected.jsonl
 store.lock
+.claude/worktrees/
