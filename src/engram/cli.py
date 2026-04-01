@@ -403,29 +403,55 @@ def dedup(ctx: click.Context, slug: str) -> None:
 
 @main.command()
 @click.option("--session", "session_id", default=None, help="Session ID to review.")
+@click.option("--transcript", "transcript_path", type=click.Path(path_type=Path),
+              default=None, help="Path to session JSONL transcript file.")
 @click.option("--mode", type=click.Choice(["auto", "interactive"]), default="auto")
 @click.pass_context
-def review(ctx: click.Context, session_id: str | None, mode: str) -> None:
+def review(ctx: click.Context, session_id: str | None, transcript_path: Path | None,
+           mode: str) -> None:
     """Review a session for procedural knowledge to capture as engrams."""
     store = _get_store(ctx.obj["store_path"])
     scanner = EngramScanner()
     reviewer = EngramReviewer(store, scanner=scanner)
 
-    # Build context (minimal for CLI — full context comes from hooks)
-    session_ctx = {
-        "project_path": str(Path.cwd()),
-        "session_id": session_id or "cli-review",
-        "tool_calls": [],
-        "outcome": "unknown",
-    }
+    sid = session_id or "cli-review"
 
-    prompt = reviewer.build_review_prompt(session_ctx)
-    click.echo(f"Review prompt built ({len(prompt)} chars)")
+    # Try to find transcript if not explicitly provided
+    if transcript_path is None and session_id:
+        # Search standard Claude Code session locations
+        for projects_dir in (Path.home() / ".claude" / "projects",):
+            if projects_dir.exists():
+                for candidate in projects_dir.rglob(f"{session_id}.jsonl"):
+                    transcript_path = candidate
+                    break
+
+    if transcript_path and transcript_path.exists():
+        session_ctx = reviewer.build_context_from_transcript(
+            transcript_path,
+            project_path=str(Path.cwd()),
+            session_id=sid,
+        )
+        prompt = reviewer.build_review_prompt(session_ctx)
+        tool_calls = session_ctx.get("tool_calls", [])
+        tool_count = len(tool_calls) if isinstance(tool_calls, list) else 0
+        click.echo(f"Loaded transcript: {tool_count} tool call(s)")
+        click.echo(f"Review prompt built ({len(prompt)} chars)")
+    else:
+        session_ctx = {
+            "project_path": str(Path.cwd()),
+            "session_id": sid,
+            "tool_calls": [],
+            "outcome": "unknown",
+        }
+        prompt = reviewer.build_review_prompt(session_ctx)
+        click.echo(f"Review prompt built ({len(prompt)} chars)")
+
     click.echo(f"Mode: {mode}")
     if mode == "interactive":
         click.echo("Interactive review requires Claude Code agent. Use /engram review instead.")
     else:
-        click.echo("Auto review requires session transcript. No actions taken.")
+        if not transcript_path:
+            click.echo("No transcript found. Provide --transcript or --session to load one.")
 
 
 # ------------------------------------------------------------------
