@@ -183,6 +183,85 @@ For "update" decisions, provide patch_type ("append", "replace_section", \
         template = self._jinja_env.get_template("engram.md.j2")
         return template.render(**kwargs)
 
+    def load_transcript(self, session_path: Path) -> list[dict[str, object]]:
+        """Load a Claude Code session JSONL transcript.
+
+        Each line is a JSON record. Malformed lines are silently skipped.
+        Raises FileNotFoundError if the file doesn't exist.
+        """
+        if not session_path.exists():
+            raise FileNotFoundError(f"Session file not found: {session_path}")
+        records: list[dict[str, object]] = []
+        with open(session_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return records
+
+    def filter_transcript(
+        self,
+        records: list[dict[str, object]],
+        last_n: int | None = None,
+    ) -> list[dict[str, object]]:
+        """Filter a raw transcript to relevant records.
+
+        Removes:
+        - file-history-snapshot records (internal bookkeeping)
+        - sidechain records (parallel branches, not main conversation)
+
+        Keeps user messages, assistant messages, tool use, tool results.
+        Optionally limits to the last N records.
+        """
+        filtered = [
+            r for r in records
+            if r.get("type") in ("user", "assistant")
+            and not r.get("isSidechain", False)
+        ]
+        if last_n is not None:
+            filtered = filtered[-last_n:]
+        return filtered
+
+    def build_context_from_transcript(
+        self,
+        session_path: Path,
+        project_path: str = "",
+        session_id: str = "",
+    ) -> dict[str, object]:
+        """Build a session_context dict from a transcript file.
+
+        Loads the transcript, filters it, and packages it into the format
+        expected by build_review_prompt().
+        """
+        raw = self.load_transcript(session_path)
+        filtered = self.filter_transcript(raw)
+
+        # Extract tool calls for the prompt
+        tool_calls: list[dict[str, object]] = []
+        for record in filtered:
+            msg = record.get("message", {})
+            if not isinstance(msg, dict):
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        tool_calls.append({
+                            "tool": block.get("name", ""),
+                            "input": block.get("input", {}),
+                        })
+
+        return {
+            "project_path": project_path,
+            "session_id": session_id,
+            "tool_calls": tool_calls,
+            "outcome": "unknown",
+        }
+
     def render_skill_template(self, engram: Engram) -> str:
         """Render an engram as a Claude Code SKILL.md file.
 
