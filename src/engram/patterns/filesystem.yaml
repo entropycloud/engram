@@ -1,0 +1,141 @@
+patterns:
+  # SSH
+  - id: "FS-001"
+    pattern: "~/.ssh/"
+    severity: critical
+    category: filesystem
+    description: "SSH directory access"
+  - id: "FS-002"
+    pattern: "\\.ssh/id_"
+    severity: critical
+    category: filesystem
+    description: "SSH private key file"
+  - id: "FS-003"
+    pattern: "\\.ssh/authorized_keys"
+    severity: critical
+    category: filesystem
+    description: "SSH authorized keys file"
+  - id: "FS-004"
+    pattern: "\\.ssh/known_hosts"
+    severity: warning
+    category: filesystem
+    description: "SSH known hosts file"
+  - id: "FS-005"
+    pattern: "\\.ssh/config"
+    severity: warning
+    category: filesystem
+    description: "SSH config file"
+
+  # AWS
+  - id: "FS-006"
+    pattern: "~/.aws/"
+    severity: critical
+    category: filesystem
+    description: "AWS config directory access"
+  - id: "FS-007"
+    pattern: "\\.aws/credentials"
+    severity: critical
+    category: filesystem
+    description: "AWS credentials file"
+  - id: "FS-008"
+    pattern: "\\.aws/config"
+    severity: warning
+    category: filesystem
+    description: "AWS config file"
+
+  # System files
+  - id: "FS-009"
+    pattern: "/etc/shadow"
+    severity: critical
+    category: filesystem
+    description: "Shadow password file"
+  - id: "FS-010"
+    pattern: "/etc/passwd"
+    severity: warning
+    category: filesystem
+    description: "Password file"
+  - id: "FS-011"
+    pattern: "/etc/sudoers"
+    severity: critical
+    category: filesystem
+    description: "Sudoers file"
+  - id: "FS-012"
+    pattern: "/etc/hosts"
+    severity: warning
+    category: filesystem
+    description: "Hosts file"
+
+  # Environment files
+  - id: "FS-013"
+    pattern: "\\.env\\b"
+    severity: warning
+    category: filesystem
+    description: "Environment file access"
+  - id: "FS-014"
+    pattern: "\\.env\\.local"
+    severity: warning
+    category: filesystem
+    description: "Local environment file"
+  - id: "FS-015"
+    pattern: "\\.env\\.production"
+    severity: critical
+    category: filesystem
+    description: "Production environment file"
+
+  # Config files with secrets
+  - id: "FS-016"
+    pattern: "\\.netrc"
+    severity: critical
+    category: filesystem
+    description: "Netrc credentials file"
+  - id: "FS-017"
+    pattern: "\\.npmrc"
+    severity: warning
+    category: filesystem
+    description: "NPM config (may contain tokens)"
+  - id: "FS-018"
+    pattern: "\\.pypirc"
+    severity: critical
+    category: filesystem
+    description: "PyPI config (contains tokens)"
+  - id: "FS-019"
+    pattern: "\\.docker/config\\.json"
+    severity: critical
+    category: filesystem
+    description: "Docker config with auth"
+  - id: "FS-020"
+    pattern: "~/.kube/config"
+    severity: critical
+    category: filesystem
+    description: "Kubernetes config"
+
+  # GPG
+  - id: "FS-021"
+    pattern: "\\.gnupg/"
+    severity: critical
+    category: filesystem
+    description: "GPG directory"
+
+  # Browser
+  - id: "FS-022"
+    pattern: "\\.mozilla/firefox/.*\\.sqlite"
+    severity: critical
+    category: filesystem
+    description: "Firefox profile database"
+  - id: "FS-023"
+    pattern: "Library/Application Support/Google/Chrome"
+    severity: critical
+    category: filesystem
+    description: "Chrome profile directory"
+
+  # Vault/secrets managers
+  - id: "FS-024"
+    pattern: "\\.vault-token"
+    severity: critical
+    category: filesystem
+    description: "HashiCorp Vault token file"
+  - id: "FS-025"
+    pattern: "credentials\\.json"
+    severity: warning
+    category: filesystem
+    description: "Credentials JSON file"

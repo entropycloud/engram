@@ -1,0 +1,168 @@
+patterns:
+  # Command substitution
+  - id: "INJ-001"
+    pattern: "\\$\\([^)]+\\)"
+    severity: critical
+    category: injection
+    description: "Shell command substitution $(...)"
+  - id: "INJ-002"
+    pattern: "`[^`]+`"
+    severity: warning
+    category: injection
+    description: "Backtick command substitution"
+
+  # Eval / exec
+  - id: "INJ-003"
+    pattern: "\\beval\\s*\\("
+    severity: critical
+    category: injection
+    description: "eval() call"
+  - id: "INJ-004"
+    pattern: "\\bexec\\s*\\("
+    severity: critical
+    category: injection
+    description: "exec() call"
+  - id: "INJ-005"
+    pattern: "\\bos\\.system\\s*\\("
+    severity: critical
+    category: injection
+    description: "os.system() call"
+  - id: "INJ-006"
+    pattern: "\\bsubprocess\\.(run|call|Popen|check_output)\\s*\\("
+    severity: warning
+    category: injection
+    description: "subprocess execution"
+  - id: "INJ-007"
+    pattern: "\\b__import__\\s*\\("
+    severity: critical
+    category: injection
+    description: "Dynamic import via __import__"
+
+  # Pipe chains
+  - id: "INJ-008"
+    pattern: "\\|\\s*(bash|sh|zsh|python|perl|ruby|node)\\b"
+    severity: critical
+    category: injection
+    description: "Pipe to interpreter"
+  - id: "INJ-009"
+    pattern: "\\|\\s*sh\\s*$"
+    severity: critical
+    category: injection
+    description: "Pipe to sh"
+  - id: "INJ-010"
+    pattern: "\\|\\s*sudo\\b"
+    severity: critical
+    category: injection
+    description: "Pipe to sudo"
+
+  # Dangerous shell commands
+  - id: "INJ-011"
+    pattern: "\\brm\\s+-[a-z]*r[a-z]*f"
+    severity: critical
+    category: injection
+    description: "Recursive force delete"
+  - id: "INJ-012"
+    pattern: "\\brm\\s+-[a-z]*f[a-z]*r"
+    severity: critical
+    category: injection
+    description: "Force recursive delete"
+  - id: "INJ-013"
+    pattern: "\\bchmod\\s+777\\b"
+    severity: warning
+    category: injection
+    description: "chmod 777 (world-writable)"
+  - id: "INJ-014"
+    pattern: "\\bchmod\\s+\\+s\\b"
+    severity: critical
+    category: injection
+    description: "chmod setuid/setgid"
+  - id: "INJ-015"
+    pattern: "\\bchown\\s+root\\b"
+    severity: warning
+    category: injection
+    description: "chown to root"
+  - id: "INJ-016"
+    pattern: "\\bmkfifo\\b"
+    severity: warning
+    category: injection
+    description: "Named pipe creation (potential reverse shell)"
+
+  # Code injection via string formatting
+  - id: "INJ-017"
+    pattern: "\\bcompile\\s*\\([^)]*\\bexec\\b"
+    severity: critical
+    category: injection
+    description: "compile() with exec mode"
+  - id: "INJ-018"
+    pattern: "\\bglobals\\s*\\(\\)"
+    severity: warning
+    category: injection
+    description: "Access to globals()"
+  - id: "INJ-019"
+    pattern: "\\bsetattr\\s*\\("
+    severity: warning
+    category: injection
+    description: "Dynamic attribute setting"
+  - id: "INJ-020"
+    pattern: "\\bgetattr\\s*\\([^)]+,[^)]+,[^)]*\\)"
+    severity: info
+    category: injection
+    description: "getattr with default (potential duck typing abuse)"
+
+  # Reverse shell patterns
+  - id: "INJ-021"
+    pattern: "/dev/tcp/"
+    severity: critical
+    category: injection
+    description: "Bash /dev/tcp reverse shell"
+  - id: "INJ-022"
+    pattern: "\\bnc\\s+-[a-z]*e\\b"
+    severity: critical
+    category: injection
+    description: "Netcat with execute flag"
+  - id: "INJ-023"
+    pattern: "\\bncat\\b.*-e\\b"
+    severity: critical
+    category: injection
+    description: "Ncat with execute flag"
+  - id: "INJ-024"
+    pattern: "\\bsocat\\b.*EXEC"
+    severity: critical
+    category: injection
+    description: "Socat with EXEC"
+
+  # Cron / scheduled tasks
+  - id: "INJ-025"
+    pattern: "\\bcrontab\\s+-[a-z]*e"
+    severity: warning
+    category: injection
+    description: "Crontab edit"
+  - id: "INJ-026"
+    pattern: "/etc/cron"
+    severity: warning
+    category: injection
+    description: "Cron directory access"
+
+  # Environment manipulation
+  - id: "INJ-027"
+    pattern: "\\bos\\.environ\\s*\\["
+    severity: info
+    category: injection
+    description: "Direct environment variable access"
+  - id: "INJ-028"
+    pattern: "\\bLD_PRELOAD\\b"
+    severity: critical
+    category: injection
+    description: "LD_PRELOAD injection"
+  - id: "INJ-029"
+    pattern: "\\bPATH\\s*=\\s*['\"/]"
+    severity: warning
+    category: injection
+    description: "PATH manipulation"
+
+  # Template injection
+  - id: "INJ-030"
+    pattern: "\\{\\{[^}]*\\}\\}"
+    severity: info
+    category: injection
+    description: "Template expression (potential SSTI)"

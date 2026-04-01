@@ -1,0 +1,114 @@
+patterns:
+  # HTTP clients
+  - id: "NET-001"
+    pattern: "\\bcurl\\b.*-[a-zA-Z]*[dX]"
+    severity: warning
+    category: network
+    description: "curl with data/method flag (outbound data)"
+  - id: "NET-002"
+    pattern: "\\bcurl\\b.*--data"
+    severity: warning
+    category: network
+    description: "curl with --data flag"
+  - id: "NET-003"
+    pattern: "\\bwget\\b"
+    severity: warning
+    category: network
+    description: "wget download"
+  - id: "NET-004"
+    pattern: "\\bcurl\\b.*\\|"
+    severity: critical
+    category: network
+    description: "curl piped to another command"
+
+  # Python HTTP
+  - id: "NET-005"
+    pattern: "\\brequests\\.(post|put|patch|delete)\\s*\\("
+    severity: warning
+    category: network
+    description: "Python requests outbound mutation"
+  - id: "NET-006"
+    pattern: "\\burllib\\.request\\.urlopen\\b"
+    severity: warning
+    category: network
+    description: "urllib URL open"
+  - id: "NET-007"
+    pattern: "\\bhttpx\\.(post|put|patch|delete)\\s*\\("
+    severity: warning
+    category: network
+    description: "httpx outbound mutation"
+
+  # DNS exfiltration
+  - id: "NET-008"
+    pattern: "\\bnslookup\\b"
+    severity: warning
+    category: network
+    description: "DNS lookup (potential exfiltration)"
+  - id: "NET-009"
+    pattern: "\\bdig\\b.*@"
+    severity: warning
+    category: network
+    description: "DNS dig with custom server"
+  - id: "NET-010"
+    pattern: "\\bhost\\b.*\\."
+    severity: info
+    category: network
+    description: "DNS host lookup"
+
+  # Raw sockets
+  - id: "NET-011"
+    pattern: "\\bsocket\\.socket\\b"
+    severity: warning
+    category: network
+    description: "Raw socket creation"
+  - id: "NET-012"
+    pattern: "\\bsocket\\.connect\\b"
+    severity: warning
+    category: network
+    description: "Socket connect"
+
+  # Tunneling
+  - id: "NET-013"
+    pattern: "\\bssh\\b.*-[a-zA-Z]*[LRD]"
+    severity: warning
+    category: network
+    description: "SSH tunnel/port forwarding"
+  - id: "NET-014"
+    pattern: "\\bngrok\\b"
+    severity: critical
+    category: network
+    description: "ngrok tunnel"
+
+  # External service calls
+  - id: "NET-015"
+    pattern: "\\btelnet\\b"
+    severity: warning
+    category: network
+    description: "Telnet connection"
+  - id: "NET-016"
+    pattern: "\\bftp\\b.*@"
+    severity: warning
+    category: network
+    description: "FTP with credentials"
+  - id: "NET-017"
+    pattern: "\\bscp\\b"
+    severity: warning
+    category: network
+    description: "SCP file transfer"
+  - id: "NET-018"
+    pattern: "\\brsync\\b.*:"
+    severity: warning
+    category: network
+    description: "rsync remote transfer"
+
+  # Webhooks / callbacks
+  - id: "NET-019"
+    pattern: "webhook[_-]?url\\s*[=:]"
+    severity: warning
+    category: network
+    description: "Webhook URL configuration"
+  - id: "NET-020"
+    pattern: "\\bcallback[_-]?url\\s*[=:]"
+    severity: warning
+    category: network
+    description: "Callback URL configuration"

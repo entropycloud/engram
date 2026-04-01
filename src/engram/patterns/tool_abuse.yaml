@@ -1,0 +1,58 @@
+patterns:
+  # Direct tool invocation attempts
+  - id: "TOOL-001"
+    pattern: "(?i)\\buse\\s+(?:the\\s+)?Bash\\s+(?:tool\\s+)?to\\b"
+    severity: warning
+    category: tool_abuse
+    description: "Instructing Bash tool usage"
+  - id: "TOOL-002"
+    pattern: "(?i)\\brun\\s+(?:this\\s+)?(?:in|with|using)\\s+Bash\\b"
+    severity: warning
+    category: tool_abuse
+    description: "Directing Bash execution"
+  - id: "TOOL-003"
+    pattern: "(?i)\\bexecute\\s+(?:this\\s+)?(?:in|with|using)\\s+(?:the\\s+)?(?:Bash|terminal|shell)\\b"
+    severity: warning
+    category: tool_abuse
+    description: "Directing shell execution"
+
+  # Write tool abuse
+  - id: "TOOL-004"
+    pattern: "(?i)\\bWrite\\s+(?:tool\\s+)?to\\s+(?:overwrite|replace|modify)\\b"
+    severity: warning
+    category: tool_abuse
+    description: "Write tool overwrite instruction"
+  - id: "TOOL-005"
+    pattern: "(?i)\\boverwrite\\s+(?:the\\s+)?(?:file|config)"
+    severity: warning
+    category: tool_abuse
+    description: "File overwrite instruction"
+
+  # Permission escalation via tools
+  - id: "TOOL-006"
+    pattern: "(?i)\\bgrant\\s+(?:yourself|me)\\s+(?:access|permission)"
+    severity: critical
+    category: tool_abuse
+    description: "Permission escalation request"
+  - id: "TOOL-007"
+    pattern: "(?i)\\bbypass\\s+(?:the\\s+)?(?:security|scanner|restriction|check)"
+    severity: critical
+    category: tool_abuse
+    description: "Security bypass instruction"
+  - id: "TOOL-008"
+    pattern: "(?i)\\bdisable\\s+(?:the\\s+)?(?:security|scanner|restriction|check)"
+    severity: critical
+    category: tool_abuse
+    description: "Security disable instruction"
+
+  # Chaining / orchestration abuse
+  - id: "TOOL-009"
+    pattern: "(?i)\\bthen\\s+use\\s+(?:the\\s+)?(?:Bash|Write)\\s+tool\\b"
+    severity: warning
+    category: tool_abuse
+    description: "Tool chaining to dangerous tool"
+  - id: "TOOL-010"
+    pattern: "(?i)\\bupload\\s+(?:this|the)\\s+(?:file|data|content)\\b"
+    severity: warning
+    category: tool_abuse
+    description: "Data upload instruction"

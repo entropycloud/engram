@@ -1,0 +1,85 @@
+patterns:
+  # Direct instruction override
+  - id: "PI-001"
+    pattern: "(?i)ignore\\s+(all\\s+)?previous\\s+instructions"
+    severity: critical
+    category: prompt_injection
+    description: "Instruction override attempt"
+  - id: "PI-002"
+    pattern: "(?i)disregard\\s+(all\\s+)?(previous|prior|above)\\s+(instructions|rules|guidelines)"
+    severity: critical
+    category: prompt_injection
+    description: "Instruction disregard attempt"
+  - id: "PI-003"
+    pattern: "(?i)forget\\s+(all\\s+)?(previous|prior|above)\\s+(instructions|context)"
+    severity: critical
+    category: prompt_injection
+    description: "Context forgetting attempt"
+
+  # Role hijacking
+  - id: "PI-004"
+    pattern: "(?i)you\\s+are\\s+now\\s+(a|an|the)\\b"
+    severity: warning
+    category: prompt_injection
+    description: "Role reassignment attempt"
+  - id: "PI-005"
+    pattern: "(?i)act\\s+as\\s+(a|an|the)\\b"
+    severity: warning
+    category: prompt_injection
+    description: "Role acting instruction"
+  - id: "PI-006"
+    pattern: "(?i)pretend\\s+(to\\s+be|you\\s+are)"
+    severity: warning
+    category: prompt_injection
+    description: "Pretend role instruction"
+  - id: "PI-007"
+    pattern: "(?i)your\\s+new\\s+(role|purpose|instructions?)\\s+(is|are)"
+    severity: critical
+    category: prompt_injection
+    description: "New role/purpose assignment"
+
+  # System prompt extraction
+  - id: "PI-008"
+    pattern: "(?i)(show|reveal|display|output|print)\\s+(your|the)\\s+(system|initial)\\s+(prompt|instructions)"
+    severity: critical
+    category: prompt_injection
+    description: "System prompt extraction attempt"
+  - id: "PI-009"
+    pattern: "(?i)what\\s+(are|is)\\s+your\\s+(system|initial)\\s+(prompt|instructions)"
+    severity: warning
+    category: prompt_injection
+    description: "System prompt query"
+
+  # Jailbreak patterns
+  - id: "PI-010"
+    pattern: "(?i)\\bDAN\\b.*mode"
+    severity: critical
+    category: prompt_injection
+    description: "DAN jailbreak attempt"
+  - id: "PI-011"
+    pattern: "(?i)developer\\s+mode\\s+(enabled|activated|on)"
+    severity: critical
+    category: prompt_injection
+    description: "Developer mode jailbreak"
+  - id: "PI-012"
+    pattern: "(?i)\\bjailbreak\\b"
+    severity: warning
+    category: prompt_injection
+    description: "Jailbreak reference"
+
+  # Hidden instructions
+  - id: "PI-013"
+    pattern: "(?i)<\\s*system\\s*>"
+    severity: critical
+    category: prompt_injection
+    description: "Fake system tag injection"
+  - id: "PI-014"
+    pattern: "(?i)\\[INST\\]"
+    severity: critical
+    category: prompt_injection
+    description: "Fake instruction tag injection"
+  - id: "PI-015"
+    pattern: "(?i)<<\\s*SYS\\s*>>"
+    severity: critical
+    category: prompt_injection
+    description: "Fake system block injection"
