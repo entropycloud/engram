@@ -1,0 +1,32 @@
+---
+name: "{{ name }}"
+version: {{ version }}
+description: "{{ description }}"
+state: {{ state }}
+created: "{{ created }}"
+updated: "{{ updated }}"
+supersedes: {{ supersedes | default('~', true) }}
+superseded_by: {{ superseded_by | default('~', true) }}
+triggers:
+  tags: {{ tags | default([], true) | tojson }}
+  patterns: {{ patterns | default([], true) | tojson }}
+  projects: {{ projects | default([], true) | tojson }}
+  files: {{ files | default([], true) | tojson }}
+trust: {{ trust }}
+allowed_tools: {{ allowed_tools | default(['Read'], true) | tojson }}
+restricted_tools: {{ restricted_tools | default([], true) | tojson }}
+metrics:
+  usage_count: 0
+  success_count: 0
+  override_count: 0
+  last_used: ~
+  last_evaluated: ~
+  quality_score: 0.0
+  streak: 0
+lineage:
+  parent: {{ parent | default('~', true) }}
+  created_from: {{ created_from | default('~', true) }}
+  creation_reason: "{{ creation_reason | default('', true) }}"
+---
+
+{{ body }}

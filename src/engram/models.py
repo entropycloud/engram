@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -213,3 +213,32 @@ class ScoredEngram(BaseModel):
     engram: Engram
     score: float
     match_reasons: list[str] = Field(default_factory=list)
+
+
+class ReviewDecision(BaseModel):
+    """A single decision from the Reviewer."""
+
+    action: Literal["create", "update", "skip"]
+    # For create:
+    engram: Engram | None = None
+    # For update:
+    target: str | None = None  # slug of engram to update
+    patch: dict[str, Any] | None = None  # patch data
+    # Common:
+    reason: str = ""
+
+
+class ReviewOutput(BaseModel):
+    """Structured output from the Reviewer agent."""
+
+    decisions: list[ReviewDecision] = Field(default_factory=list)
+
+
+class ReviewReport(BaseModel):
+    """Report of what the Reviewer did."""
+
+    created: list[str] = Field(default_factory=list)  # slugs created
+    updated: list[str] = Field(default_factory=list)  # slugs updated
+    skipped: int = 0
+    blocked: list[str] = Field(default_factory=list)  # slugs blocked by scanner
+    errors: list[str] = Field(default_factory=list)

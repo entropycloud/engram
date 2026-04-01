@@ -12,6 +12,7 @@ from engram.formatting import format_engram_detail, format_engram_table
 from engram.hooks import record_feedback, record_signal
 from engram.lifecycle import LifecycleManager
 from engram.models import EngramState, SessionContext
+from engram.reviewer import EngramReviewer
 from engram.scanner import EngramScanner
 from engram.selector import EngramSelector
 from engram.store import EngramStore
@@ -364,3 +365,78 @@ def dedup(ctx: click.Context, slug: str) -> None:
             f"  {c.slug} ({c.similarity_type}: {c.similarity_score:.2f}) "
             f"— {c.description}"
         )
+
+
+# ------------------------------------------------------------------
+# Reviewer command
+# ------------------------------------------------------------------
+
+
+@main.command()
+@click.option("--session", "session_id", default=None, help="Session ID to review.")
+@click.option("--mode", type=click.Choice(["auto", "interactive"]), default="auto")
+@click.pass_context
+def review(ctx: click.Context, session_id: str | None, mode: str) -> None:
+    """Review a session for procedural knowledge to capture as engrams."""
+    store = _get_store(ctx.obj["store_path"])
+    scanner = EngramScanner()
+    reviewer = EngramReviewer(store, scanner=scanner)
+
+    # Build context (minimal for CLI — full context comes from hooks)
+    session_ctx = {
+        "project_path": str(Path.cwd()),
+        "session_id": session_id or "cli-review",
+        "tool_calls": [],
+        "outcome": "unknown",
+    }
+
+    prompt = reviewer.build_review_prompt(session_ctx)
+    click.echo(f"Review prompt built ({len(prompt)} chars)")
+    click.echo(f"Mode: {mode}")
+    if mode == "interactive":
+        click.echo("Interactive review requires Claude Code agent. Use /engram review instead.")
+    else:
+        click.echo("Auto review requires session transcript. No actions taken.")
+
+
+# ------------------------------------------------------------------
+# Install / uninstall commands
+# ------------------------------------------------------------------
+
+
+@main.command()
+@click.option("--global/--project", "global_install", default=True,
+              help="Install globally or for current project.")
+@click.pass_context
+def install(ctx: click.Context, global_install: bool) -> None:
+    """Install Claude Code integration (skill, agent, hooks)."""
+    from engram.install import install_claude_code_integration
+
+    project_path = Path.cwd() if not global_install else None
+    report = install_claude_code_integration(
+        global_install=global_install,
+        project_path=project_path,
+    )
+    for path in report.get("created", []):
+        click.echo(f"  Created: {path}")
+    for path in report.get("updated", []):
+        click.echo(f"  Updated: {path}")
+    click.echo("Engram integration installed.")
+
+
+@main.command()
+@click.option("--global/--project", "global_install", default=True,
+              help="Uninstall globally or for current project.")
+@click.pass_context
+def uninstall(ctx: click.Context, global_install: bool) -> None:
+    """Remove Claude Code integration (preserves engram data)."""
+    from engram.install import uninstall_claude_code_integration
+
+    project_path = Path.cwd() if not global_install else None
+    report = uninstall_claude_code_integration(
+        global_install=global_install,
+        project_path=project_path,
+    )
+    for path in report.get("removed", []):
+        click.echo(f"  Removed: {path}")
+    click.echo("Engram integration uninstalled. Engram data preserved.")
