@@ -1,6 +1,6 @@
 [project]
 name = "engram"
-version = "0.1.0dev"
+version = "0.1.0"
 description = "Self-improving procedural memory for Claude Code"
 license = "MIT"
 requires-python = ">=3.11"
