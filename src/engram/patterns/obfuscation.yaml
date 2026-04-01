@@ -1,0 +1,89 @@
+patterns:
+  # Base64
+  - id: "OBF-001"
+    pattern: "\\bbase64\\.(b64)?decode\\b"
+    severity: warning
+    category: obfuscation
+    description: "Base64 decode call"
+  - id: "OBF-002"
+    pattern: "\\bbase64\\.(b64)?encode\\b"
+    severity: info
+    category: obfuscation
+    description: "Base64 encode call"
+  - id: "OBF-003"
+    pattern: "\\batob\\s*\\("
+    severity: warning
+    category: obfuscation
+    description: "JavaScript base64 decode"
+  - id: "OBF-004"
+    pattern: "\\bbtoa\\s*\\("
+    severity: info
+    category: obfuscation
+    description: "JavaScript base64 encode"
+
+  # Hex encoding
+  - id: "OBF-005"
+    pattern: "\\\\x[0-9a-fA-F]{2}(?:\\\\x[0-9a-fA-F]{2}){5,}"
+    severity: warning
+    category: obfuscation
+    description: "Hex-encoded byte sequence (6+ bytes)"
+  - id: "OBF-006"
+    pattern: "\\bbytes\\.fromhex\\s*\\("
+    severity: warning
+    category: obfuscation
+    description: "Python bytes.fromhex"
+  - id: "OBF-007"
+    pattern: "\\bcodecs\\.decode\\s*\\("
+    severity: warning
+    category: obfuscation
+    description: "Python codecs decode (potential encoding trick)"
+
+  # Unicode tricks
+  - id: "OBF-008"
+    pattern: "\\\\u[0-9a-fA-F]{4}(?:\\\\u[0-9a-fA-F]{4}){3,}"
+    severity: warning
+    category: obfuscation
+    description: "Unicode escape sequence (4+ chars)"
+  - id: "OBF-009"
+    pattern: "\\\\U[0-9a-fA-F]{8}"
+    severity: warning
+    category: obfuscation
+    description: "Unicode 32-bit escape"
+
+  # ROT13 / caesar
+  - id: "OBF-010"
+    pattern: "\\bcodecs\\.decode\\s*\\([^)]*'rot_?13'"
+    severity: warning
+    category: obfuscation
+    description: "ROT13 decoding"
+  - id: "OBF-011"
+    pattern: "\\brot13\\b"
+    severity: info
+    category: obfuscation
+    description: "ROT13 reference"
+
+  # Compression as obfuscation
+  - id: "OBF-012"
+    pattern: "\\bzlib\\.decompress\\b"
+    severity: info
+    category: obfuscation
+    description: "zlib decompress (may hide payloads)"
+  - id: "OBF-013"
+    pattern: "\\bgzip\\.decompress\\b"
+    severity: info
+    category: obfuscation
+    description: "gzip decompress"
+
+  # String concatenation tricks
+  - id: "OBF-014"
+    pattern: "chr\\s*\\(\\s*\\d+\\s*\\)\\s*\\+\\s*chr"
+    severity: warning
+    category: obfuscation
+    description: "String building via chr() concatenation"
+
+  # Marshal/pickle deserialization
+  - id: "OBF-015"
+    pattern: "\\b(?:pickle|marshal|shelve)\\.loads?\\b"
+    severity: critical
+    category: obfuscation
+    description: "Unsafe deserialization (code execution risk)"
