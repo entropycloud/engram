@@ -10,7 +10,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 
 from engram.fuzzy_patch import Patch, PatchType, apply_patch
-from engram.models import ReviewDecision, ReviewOutput, ReviewReport
+from engram.models import Engram, ReviewDecision, ReviewOutput, ReviewReport
 from engram.scanner import EngramScanner
 from engram.store import EngramStore
 
@@ -182,6 +182,20 @@ For "update" decisions, provide patch_type ("append", "replace_section", \
         """Render the Jinja2 engram template with the given variables."""
         template = self._jinja_env.get_template("engram.md.j2")
         return template.render(**kwargs)
+
+    def render_skill_template(self, engram: Engram) -> str:
+        """Render an engram as a Claude Code SKILL.md file.
+
+        Transforms the engram into SKILL.md format with frontmatter
+        containing name, description, and allowed-tools.
+        """
+        template = self._jinja_env.get_template("skill.md.j2")
+        return template.render(
+            name=engram.name,
+            description=engram.description,
+            allowed_tools=engram.allowed_tools,
+            body=engram.body,
+        )
 
     # ------------------------------------------------------------------
     # Private helpers

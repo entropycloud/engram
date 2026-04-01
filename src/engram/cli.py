@@ -5,13 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
+import frontmatter
 
 from engram import __version__
 from engram.evaluator import EngramEvaluator
 from engram.formatting import format_engram_detail, format_engram_table
 from engram.hooks import record_feedback, record_signal
 from engram.lifecycle import LifecycleManager
-from engram.models import EngramState, SessionContext
+from engram.models import Engram, EngramState, SessionContext
 from engram.reviewer import EngramReviewer
 from engram.scanner import EngramScanner
 from engram.selector import EngramSelector
@@ -189,6 +190,34 @@ def scan(ctx: click.Context, slug: str) -> None:
 
     if verdict.action == "block":
         ctx.exit(1)
+
+
+# ------------------------------------------------------------------
+# Skill export command
+# ------------------------------------------------------------------
+
+
+@main.command("export-skill")
+@click.argument("slug")
+@click.option("--output", "output_path", type=click.Path(path_type=Path), default=None,
+              help="Write SKILL.md to file instead of stdout.")
+@click.pass_context
+def export_skill(ctx: click.Context, slug: str, output_path: Path | None) -> None:
+    """Export an engram as a Claude Code SKILL.md file."""
+    store = _get_store(ctx.obj["store_path"])
+    try:
+        engram = store.read(slug)
+    except FileNotFoundError:
+        raise click.ClickException(f"Engram not found: {slug}") from None
+
+    reviewer = EngramReviewer(store)
+    content = reviewer.render_skill_template(engram)
+
+    if output_path is not None:
+        output_path.write_text(content, encoding="utf-8")
+        click.echo(f"Exported {slug} as SKILL.md to {output_path}")
+    else:
+        click.echo(content)
 
 
 # ------------------------------------------------------------------
@@ -440,3 +469,76 @@ def uninstall(ctx: click.Context, global_install: bool) -> None:
     for path in report.get("removed", []):
         click.echo(f"  Removed: {path}")
     click.echo("Engram integration uninstalled. Engram data preserved.")
+
+
+# ------------------------------------------------------------------
+# Import / export commands
+# ------------------------------------------------------------------
+
+
+@main.command("export")
+@click.argument("slug")
+@click.option(
+    "--output", "output_path", type=click.Path(path_type=Path), default=None,
+    help="Write to file instead of stdout.",
+)
+@click.pass_context
+def export_cmd(ctx: click.Context, slug: str, output_path: Path | None) -> None:
+    """Export an engram to a standalone Markdown file."""
+    store = _get_store(ctx.obj["store_path"])
+    try:
+        engram = store.read(slug)
+    except FileNotFoundError:
+        raise click.ClickException(f"Engram not found: {slug}") from None
+
+    meta = engram.model_dump(mode="json", exclude={"body"})
+    post = frontmatter.Post(engram.body, **meta)
+    content = frontmatter.dumps(post)
+
+    if output_path is not None:
+        output_path.write_text(content, encoding="utf-8")
+        click.echo(f"Exported {slug} to {output_path}")
+    else:
+        click.echo(content)
+
+
+@main.command("import")
+@click.argument("file_path", type=click.Path(exists=True, path_type=Path))
+@click.pass_context
+def import_cmd(ctx: click.Context, file_path: Path) -> None:
+    """Import an engram from a file. Full security scan applied."""
+    store = _get_store(ctx.obj["store_path"])
+
+    # Parse file
+    try:
+        post = frontmatter.load(str(file_path))
+        meta = dict(post.metadata)
+        meta["body"] = post.content
+        # Force draft state for safety
+        meta["state"] = EngramState.DRAFT.value
+        engram = Engram.model_validate(meta)
+    except Exception as e:
+        raise click.ClickException(f"Failed to parse engram file: {e}") from None
+
+    # Security scan
+    scanner = EngramScanner()
+    verdict = scanner.scan(engram)
+
+    # Print scan findings
+    for finding in verdict.results:
+        click.echo(
+            f"  [{finding.severity.upper()}] {finding.pattern_id}: "
+            f"{finding.message} (line {finding.line_number})"
+        )
+
+    if verdict.action == "block":
+        click.echo(f"\nScan verdict: BLOCK — {engram.name} was not imported.")
+        ctx.exit(1)
+        return
+
+    if verdict.action == "warn":
+        click.echo("\nScan verdict: WARNING — proceeding with import.")
+
+    # Write to store
+    store.write(engram)
+    click.echo(f"Imported {engram.name} (state=draft)")
