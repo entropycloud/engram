@@ -72,7 +72,10 @@ class EngramReviewer:
         tool_calls_text = json.dumps(tool_calls, indent=2) if tool_calls else "(none)"
 
         # Build injected engrams section if any were active this session
-        injected_slugs = session_context.get("injected_slugs", [])
+        raw_injected = session_context.get("injected_slugs", [])
+        injected_slugs: list[str] = (
+            list(raw_injected) if isinstance(raw_injected, (list, tuple)) else []
+        )
         injected_section = ""
         if injected_slugs:
             lines = [
@@ -81,8 +84,8 @@ class EngramReviewer:
                 "Evaluate whether the assistant followed each one:",
             ]
             for slug in injected_slugs:
-                entry = index.engrams.get(slug)  # type: ignore[union-attr]
-                desc = entry.description if entry else "(unknown)"
+                maybe_entry = index.engrams.get(slug)
+                desc = maybe_entry.description if maybe_entry else "(unknown)"
                 lines.append(f"- {slug}: {desc}")
             lines.append(
                 '\nFor each injected engram, add an "evaluate" decision '
