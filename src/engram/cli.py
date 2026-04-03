@@ -150,9 +150,14 @@ def rate(ctx: click.Context, slug: str, rating: str) -> None:
 
 
 @main.command()
-@click.option("--event", "event_type", required=True,
-              type=click.Choice(["used", "success", "override", "feedback", "session_end", "tool_use"]),
-              help="Event type to record.")
+@click.option(
+    "--event", "event_type", required=True,
+    type=click.Choice([
+        "used", "success", "override",
+        "feedback", "session_end", "tool_use",
+    ]),
+    help="Event type to record.",
+)
 @click.option("--session", required=True, help="Session ID.")
 @click.option("--slug", required=True, help="Engram slug.")
 @click.option("--context", default=None, help="Context string.")
