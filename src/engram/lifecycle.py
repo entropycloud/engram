@@ -200,21 +200,23 @@ class LifecycleManager:
         now = datetime.now(tz=UTC)
         known_slugs = set(self._store.list())
 
-        # 1. Archive stale deprecated engrams
+        # 1. Archive stale deprecated engrams (pinned engrams are protected)
         for slug in list(known_slugs):
             engram = self._store.read(slug)
-            if engram.state == EngramState.DEPRECATED:
+            if engram.state == EngramState.DEPRECATED and not engram.pinned:
                 days_since_update = (now - engram.updated).days
                 if days_since_update >= 90 and engram.metrics.usage_count == 0:
                     self._store.move_to_archive(slug)
                     report.archived.append(slug)
                     known_slugs.discard(slug)
 
-        # 2. Clean orphaned metrics files
+        # 2. Clean orphaned metrics files (skip internal _-prefixed files)
         metrics_dir = self._store.root / "metrics"
         if metrics_dir.exists():
             for metrics_file in sorted(metrics_dir.glob("*.jsonl")):
                 slug = metrics_file.stem
+                if slug.startswith("_"):
+                    continue
                 if slug not in known_slugs:
                     metrics_file.unlink()
                     report.orphan_metrics_cleaned.append(slug)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
@@ -387,7 +388,8 @@ class TestReviewSession:
 
 
 class TestReviewCLI:
-    def test_review_command_auto(self, tmp_path: Path) -> None:
+    def test_review_command_auto_no_anthropic(self, tmp_path: Path) -> None:
+        """Auto mode without anthropic installed exits cleanly."""
         store_path = tmp_path / "store"
         for subdir in ("engram", "archive", "metrics", "versions"):
             (store_path / subdir).mkdir(parents=True, exist_ok=True)
@@ -395,7 +397,6 @@ class TestReviewCLI:
         result = runner.invoke(main, ["--store", str(store_path), "review"])
         assert result.exit_code == 0
         assert "Review prompt built" in result.output
-        assert "Mode: auto" in result.output
 
     def test_review_command_interactive(self, tmp_path: Path) -> None:
         store_path = tmp_path / "store"
@@ -413,6 +414,247 @@ class TestReviewCLI:
         for subdir in ("engram", "archive", "metrics", "versions"):
             (store_path / subdir).mkdir(parents=True, exist_ok=True)
         runner = CliRunner()
-        result = runner.invoke(main, ["--store", str(store_path), "review", "--session", "my-sess"])
+        result = runner.invoke(main, [
+            "--store", str(store_path), "review", "--session", "my-sess", "--dry-run",
+        ])
         assert result.exit_code == 0
-        assert "Review prompt built" in result.output
+
+    def test_review_dry_run(self, tmp_path: Path) -> None:
+        store_path = tmp_path / "store"
+        for subdir in ("engram", "archive", "metrics", "versions"):
+            (store_path / subdir).mkdir(parents=True, exist_ok=True)
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["--store", str(store_path), "review", "--dry-run"],
+        )
+        assert result.exit_code == 0
+        # Dry run should print the actual prompt content (includes JSON/decisions instructions)
+        assert "decisions" in result.output.lower() or "review" in result.output.lower()
+
+
+# ------------------------------------------------------------------
+# End-to-end pipeline tests (mocked LLM)
+# ------------------------------------------------------------------
+
+
+class TestReviewPipelineEndToEnd:
+    def _make_transcript(self, tmp_path: Path) -> Path:
+        """Create a minimal JSONL transcript file."""
+        transcript = tmp_path / "session.jsonl"
+        records = [
+            {
+                "type": "user",
+                "uuid": "u1",
+                "parentUuid": None,
+                "isSidechain": False,
+                "message": {"role": "user", "content": "fix the bug"},
+            },
+            {
+                "type": "assistant",
+                "uuid": "a1",
+                "parentUuid": "u1",
+                "isSidechain": False,
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "tool_use", "name": "Read", "input": {"path": "src/main.py"}},
+                    ],
+                },
+            },
+        ]
+        transcript.write_text(
+            "\n".join(json.dumps(r) for r in records), encoding="utf-8"
+        )
+        return transcript
+
+    def test_auto_mode_creates_engram(self, tmp_path: Path) -> None:
+        store_path = tmp_path / "store"
+        for subdir in ("engram", "archive", "metrics", "versions"):
+            (store_path / subdir).mkdir(parents=True, exist_ok=True)
+
+        transcript = self._make_transcript(tmp_path)
+
+        now = datetime.now(tz=UTC).isoformat()
+        llm_response = json.dumps({
+            "decisions": [
+                {
+                    "action": "create",
+                    "engram": {
+                        "name": "bug-fix-pattern",
+                        "version": 1,
+                        "description": "How to fix bugs",
+                        "state": "draft",
+                        "created": now,
+                        "updated": now,
+                        "trust": "agent-created",
+                        "triggers": {"tags": ["bugfix"]},
+                        "body": "## Procedure\n1. Read the code\n2. Fix the bug",
+                    },
+                    "reason": "new pattern observed",
+                }
+            ]
+        })
+
+        runner = CliRunner()
+        with patch("engram.llm.call_reviewer_llm", return_value=llm_response) as mock_llm:
+            result = runner.invoke(main, [
+                "--store", str(store_path),
+                "review",
+                "--transcript", str(transcript),
+                "--mode", "auto",
+            ])
+
+        assert result.exit_code == 0, result.output
+        assert "Created: bug-fix-pattern" in result.output
+        mock_llm.assert_called_once()
+
+        # Verify engram actually written to store
+        store = EngramStore(store_path)
+        engram = store.read("bug-fix-pattern")
+        assert engram.description == "How to fix bugs"
+        assert engram.state == EngramState.DRAFT
+
+    def test_llm_failure_exits_cleanly(self, tmp_path: Path) -> None:
+        store_path = tmp_path / "store"
+        for subdir in ("engram", "archive", "metrics", "versions"):
+            (store_path / subdir).mkdir(parents=True, exist_ok=True)
+
+        transcript = self._make_transcript(tmp_path)
+
+        from engram.llm import LLMError
+
+        runner = CliRunner()
+        with patch("engram.llm.call_reviewer_llm", side_effect=LLMError("API timeout")):
+            result = runner.invoke(main, [
+                "--store", str(store_path),
+                "review",
+                "--transcript", str(transcript),
+                "--mode", "auto",
+            ])
+
+        # Must exit 0 — hook must never fail the session
+        assert result.exit_code == 0
+
+    def test_missing_anthropic_exits_cleanly(self, tmp_path: Path) -> None:
+        store_path = tmp_path / "store"
+        for subdir in ("engram", "archive", "metrics", "versions"):
+            (store_path / subdir).mkdir(parents=True, exist_ok=True)
+
+        runner = CliRunner()
+        # call_reviewer_llm raises ImportError when anthropic isn't installed
+        with patch(
+            "engram.llm.call_reviewer_llm",
+            side_effect=ImportError("pip install engram[llm]"),
+        ):
+            result = runner.invoke(main, [
+                "--store", str(store_path),
+                "review",
+                "--mode", "auto",
+            ])
+
+        assert result.exit_code == 0
+
+
+# ------------------------------------------------------------------
+# Injected engrams in review prompt
+# ------------------------------------------------------------------
+
+
+class TestBuildReviewPromptInjectedSlugs:
+    def test_review_prompt_includes_injected_slugs(self, tmp_path: Path) -> None:
+        """When injected_slugs are in session context, the prompt includes the section."""
+        from engram.reviewer import EngramReviewer
+
+        store = _make_store(tmp_path)
+        store.write(_make_engram("active-engram", description="An active engram"))
+        reviewer = EngramReviewer(store)
+        ctx = {
+            "project_path": "/proj",
+            "session_id": "s1",
+            "tool_calls": [],
+            "outcome": "success",
+            "injected_slugs": ["active-engram"],
+        }
+        prompt = reviewer.build_review_prompt(ctx)
+        assert "Injected Engrams" in prompt
+        assert "active-engram" in prompt
+        assert "An active engram" in prompt
+        assert '"evaluate"' in prompt
+
+    def test_review_prompt_no_injected_slugs(self, tmp_path: Path) -> None:
+        """Backward compat: no injected_slugs means no injected section."""
+        from engram.reviewer import EngramReviewer
+
+        store = _make_store(tmp_path)
+        reviewer = EngramReviewer(store)
+        ctx = {
+            "project_path": "/proj",
+            "session_id": "s1",
+            "tool_calls": [],
+            "outcome": "success",
+        }
+        prompt = reviewer.build_review_prompt(ctx)
+        assert "Injected Engrams" not in prompt
+
+
+# ------------------------------------------------------------------
+# execute_decisions: evaluate action
+# ------------------------------------------------------------------
+
+
+class TestExecuteEvaluate:
+    def test_execute_evaluate_success(self, tmp_path: Path) -> None:
+        """Evaluate with outcome=success records signal and updates score."""
+        from engram.evaluator import EngramEvaluator
+        from engram.reviewer import EngramReviewer
+
+        store = _make_store(tmp_path)
+        store.write(_make_engram("target-engram"))
+        reviewer = EngramReviewer(store)
+
+        output = ReviewOutput(decisions=[
+            ReviewDecision(
+                action="evaluate",
+                target="target-engram",
+                outcome="success",
+                reason="followed the procedure",
+            ),
+        ])
+        report = reviewer.execute_decisions(output, session_id="sess-1")
+
+        assert "target-engram" in report.evaluated
+
+        # Verify signal was recorded as a metric event
+        evaluator = EngramEvaluator(store)
+        events = evaluator.read_events("target-engram")
+        assert any(e.event == "success" for e in events)
+
+        # Verify score was updated
+        engram = store.read("target-engram")
+        assert engram.metrics.last_evaluated is not None
+
+    def test_execute_evaluate_unused_is_noop(self, tmp_path: Path) -> None:
+        """Evaluate with outcome=unused does nothing (not added to report)."""
+        from engram.evaluator import EngramEvaluator
+        from engram.reviewer import EngramReviewer
+
+        store = _make_store(tmp_path)
+        store.write(_make_engram("target-engram"))
+        reviewer = EngramReviewer(store)
+
+        output = ReviewOutput(decisions=[
+            ReviewDecision(
+                action="evaluate",
+                target="target-engram",
+                outcome="unused",
+                reason="not relevant this session",
+            ),
+        ])
+        report = reviewer.execute_decisions(output, session_id="sess-1")
+
+        assert report.evaluated == []
+
+        # Verify no events were recorded
+        evaluator = EngramEvaluator(store)
+        events = evaluator.read_events("target-engram")
+        assert events == []

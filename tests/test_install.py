@@ -43,21 +43,33 @@ class TestMergeHooks:
         result = _merge_hooks({}, HOOK_CONFIG["hooks"])
         assert "hooks" in result
         assert "Stop" in result["hooks"]
-        assert len(result["hooks"]["Stop"]) == 2
+        # 1 matcher object containing 2 hooks
+        assert len(result["hooks"]["Stop"]) == 1
+        assert len(result["hooks"]["Stop"][0]["hooks"]) == 2
 
     def test_merge_preserves_existing_non_engram_hooks(self) -> None:
         existing = {
             "hooks": {
                 "Stop": [
-                    {"type": "command", "command": "other-tool cleanup", "timeout": 3000}
+                    {
+                        "matcher": "other",
+                        "hooks": [
+                            {"type": "command", "command": "other-tool cleanup", "timeout": 3000}
+                        ],
+                    }
                 ]
             }
         }
         result = _merge_hooks(existing, HOOK_CONFIG["hooks"])
-        stop_hooks = result["hooks"]["Stop"]
-        commands = [h["command"] for h in stop_hooks]
-        assert "other-tool cleanup" in commands
-        assert any("engram review" in c for c in commands)
+        stop_matchers = result["hooks"]["Stop"]
+        # Should have 2 matchers: "other" and "" (engram)
+        all_cmds = [
+            h["command"]
+            for m in stop_matchers
+            for h in m.get("hooks", [])
+        ]
+        assert "other-tool cleanup" in all_cmds
+        assert any("engram review" in c for c in all_cmds)
 
     def test_merge_no_duplicates(self) -> None:
         """Running merge twice should not create duplicate hooks."""
@@ -81,24 +93,36 @@ class TestRemoveHooks:
     def test_remove_engram_hooks(self) -> None:
         settings = _merge_hooks({}, HOOK_CONFIG["hooks"])
         result = _remove_hooks(settings, HOOK_CONFIG["hooks"])
-        # All engram hooks removed, so event keys should be empty or gone
-        for event_hooks in result.get("hooks", {}).values():
-            for h in event_hooks:
-                assert "engram" not in h.get("command", "")
+        # All engram hooks removed, so event keys should have empty matcher lists
+        for event_matchers in result.get("hooks", {}).values():
+            for matcher in event_matchers:
+                for h in matcher.get("hooks", []):
+                    assert "engram" not in h.get("command", "")
 
     def test_remove_preserves_other_hooks(self) -> None:
         existing = {
             "hooks": {
                 "Stop": [
-                    {"type": "command", "command": "other-tool cleanup", "timeout": 3000}
+                    {
+                        "matcher": "other",
+                        "hooks": [
+                            {"type": "command", "command": "other-tool cleanup", "timeout": 3000}
+                        ],
+                    }
                 ]
             }
         }
         merged = _merge_hooks(existing, HOOK_CONFIG["hooks"])
         result = _remove_hooks(merged, HOOK_CONFIG["hooks"])
-        stop_hooks = result["hooks"]["Stop"]
-        assert len(stop_hooks) == 1
-        assert stop_hooks[0]["command"] == "other-tool cleanup"
+        stop_matchers = result["hooks"]["Stop"]
+        # "other" matcher should remain, engram matcher removed
+        all_cmds = [
+            h["command"]
+            for m in stop_matchers
+            for h in m.get("hooks", [])
+        ]
+        assert "other-tool cleanup" in all_cmds
+        assert not any("engram" in c for c in all_cmds)
 
     def test_remove_from_empty_settings(self) -> None:
         result = _remove_hooks({}, HOOK_CONFIG["hooks"])
@@ -146,7 +170,11 @@ class TestInstallGlobal:
         settings = json.loads(settings_path.read_text())
         assert "hooks" in settings
         assert "Stop" in settings["hooks"]
-        stop_cmds = [h["command"] for h in settings["hooks"]["Stop"]]
+        stop_cmds = [
+            h["command"]
+            for m in settings["hooks"]["Stop"]
+            for h in m.get("hooks", [])
+        ]
         assert any("engram review" in c for c in stop_cmds)
         assert any("engram signal" in c for c in stop_cmds)
 
@@ -155,8 +183,9 @@ class TestInstallGlobal:
         install_claude_code_integration(global_install=True)
         settings_path = fake_home / ".claude" / "settings.json"
         settings = json.loads(settings_path.read_text())
-        # No duplicates
-        assert len(settings["hooks"]["Stop"]) == 2
+        # No duplicates: 1 matcher with 2 hooks
+        assert len(settings["hooks"]["Stop"]) == 1
+        assert len(settings["hooks"]["Stop"][0]["hooks"]) == 2
 
     def test_preserves_existing_settings(self, fake_home: Path) -> None:
         settings_dir = fake_home / ".claude"
@@ -166,14 +195,23 @@ class TestInstallGlobal:
             "model": "claude-opus-4-0-20250514",
             "hooks": {
                 "Stop": [
-                    {"type": "command", "command": "my-tool goodbye", "timeout": 2000}
+                    {
+                        "matcher": "custom",
+                        "hooks": [
+                            {"type": "command", "command": "my-tool goodbye", "timeout": 2000}
+                        ],
+                    }
                 ]
             }
         }))
         install_claude_code_integration(global_install=True)
         settings = json.loads(settings_path.read_text())
         assert settings["model"] == "claude-opus-4-0-20250514"
-        stop_cmds = [h["command"] for h in settings["hooks"]["Stop"]]
+        stop_cmds = [
+            h["command"]
+            for m in settings["hooks"]["Stop"]
+            for h in m.get("hooks", [])
+        ]
         assert "my-tool goodbye" in stop_cmds
 
     def test_report_structure(self, fake_home: Path) -> None:
@@ -254,25 +292,35 @@ class TestUninstallGlobal:
         uninstall_claude_code_integration(global_install=True)
         settings_path = fake_home / ".claude" / "settings.json"
         settings = json.loads(settings_path.read_text())
-        for event_hooks in settings.get("hooks", {}).values():
-            for h in event_hooks:
-                assert "engram" not in h.get("command", "")
+        for event_matchers in settings.get("hooks", {}).values():
+            for matcher in event_matchers:
+                for h in matcher.get("hooks", []):
+                    assert "engram" not in h.get("command", "")
 
     def test_preserves_other_hooks(self, fake_home: Path) -> None:
-        # Pre-existing hook
+        # Pre-existing hook in matcher format
         settings_dir = fake_home / ".claude"
         settings_dir.mkdir(parents=True)
         (settings_dir / "settings.json").write_text(json.dumps({
             "hooks": {
                 "Stop": [
-                    {"type": "command", "command": "my-tool goodbye", "timeout": 2000}
+                    {
+                        "matcher": "custom",
+                        "hooks": [
+                            {"type": "command", "command": "my-tool goodbye", "timeout": 2000}
+                        ],
+                    }
                 ]
             }
         }))
         install_claude_code_integration(global_install=True)
         uninstall_claude_code_integration(global_install=True)
         settings = json.loads((settings_dir / "settings.json").read_text())
-        stop_cmds = [h["command"] for h in settings["hooks"]["Stop"]]
+        stop_cmds = [
+            h["command"]
+            for m in settings["hooks"]["Stop"]
+            for h in m.get("hooks", [])
+        ]
         assert "my-tool goodbye" in stop_cmds
 
     def test_preserves_engram_data(self, fake_home: Path) -> None:
