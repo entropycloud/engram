@@ -496,3 +496,45 @@ class TestCLISignal:
             "--event", "used", "--session", "sess-1",
         ])
         assert result.exit_code != 0
+
+
+# ------------------------------------------------------------------
+# Pinned engram staleness decay
+# ------------------------------------------------------------------
+
+
+class TestPinnedStalenessDecay:
+    """Test that pinned engrams skip staleness decay."""
+
+    def test_staleness_decay_skipped_for_pinned(self, tmp_store: Path) -> None:
+        """Pinned engram with stale events does NOT get staleness decay applied."""
+        from engram.evaluator import EngramEvaluator
+
+        store = _get_store(tmp_store)
+        evaluator = EngramEvaluator(store)
+
+        old_ts = datetime.now(tz=UTC) - timedelta(days=90)
+        events = [
+            _make_event("used", ts=old_ts),
+            _make_event("success", ts=old_ts),
+        ]
+        # Base score: 0.5 + 0.3*(1-0.5) = 0.65
+        # With pinned=True, no staleness decay
+        score = evaluator.compute_quality_score(events, pinned=True)
+        assert score == 0.65
+
+    def test_staleness_decay_applied_for_unpinned(self, tmp_store: Path) -> None:
+        """Unpinned engram with same stale events DOES get staleness decay."""
+        from engram.evaluator import EngramEvaluator
+
+        store = _get_store(tmp_store)
+        evaluator = EngramEvaluator(store)
+
+        old_ts = datetime.now(tz=UTC) - timedelta(days=90)
+        events = [
+            _make_event("used", ts=old_ts),
+            _make_event("success", ts=old_ts),
+        ]
+        # Base score: 0.65, 60 days stale -> 2 months -> 0.65 * 0.8 = 0.52
+        score = evaluator.compute_quality_score(events, pinned=False)
+        assert score == 0.52

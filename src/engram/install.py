@@ -16,40 +16,52 @@ HOOK_CONFIG: dict[str, dict[str, list[dict[str, object]]]] = {
     "hooks": {
         "Stop": [
             {
-                "type": "command",
-                "command": (
-                    "engram review --session=$CLAUDE_SESSION_ID"
-                    " --mode=auto --non-blocking"
-                ),
-                "timeout": 5000,
-            },
-            {
-                "type": "command",
-                "command": (
-                    "engram signal --event=session_end"
-                    " --session=$CLAUDE_SESSION_ID --slug=_session"
-                ),
-                "timeout": 1000,
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": (
+                            "engram review --session=$CLAUDE_SESSION_ID"
+                            " --mode=auto"
+                        ),
+                        "timeout": 30000,
+                    },
+                    {
+                        "type": "command",
+                        "command": (
+                            "engram signal --event=session_end"
+                            " --session=$CLAUDE_SESSION_ID --slug=_session"
+                        ),
+                        "timeout": 1000,
+                    },
+                ],
             },
         ],
         "PostToolUse": [
             {
-                "type": "command",
-                "command": (
-                    "engram signal --event=tool_use"
-                    " --session=$CLAUDE_SESSION_ID --slug=_session"
-                ),
-                "timeout": 1000,
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": (
+                            "engram signal --event=tool_use"
+                            " --session=$CLAUDE_SESSION_ID --slug=_session"
+                        ),
+                        "timeout": 1000,
+                    },
+                ],
             },
         ],
         "UserPromptSubmit": [
             {
-                "type": "command",
-                "command": (
-                    "engram select --session=$CLAUDE_SESSION_ID"
-                    " --prompt-file=$PROMPT_FILE --output=$ENGRAM_CONTEXT_FILE"
-                ),
-                "timeout": 2000,
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "engram select --from-hook",
+                        "timeout": 2000,
+                    },
+                ],
             },
         ],
     }
@@ -63,7 +75,8 @@ def _merge_hooks(
     """Merge new hooks into existing settings without creating duplicates.
 
     *existing* is the full settings dict (may contain non-hook keys).
-    *new_hooks* maps event names to lists of hook entries to add.
+    *new_hooks* maps event names to lists of matcher objects (new format).
+    Each matcher object has {"matcher": "...", "hooks": [...]}.
 
     Returns the updated settings dict (mutated in place for convenience).
     """
@@ -71,13 +84,49 @@ def _merge_hooks(
         existing["hooks"] = {}
     hooks: dict[str, list[dict[str, object]]] = existing["hooks"]  # type: ignore[assignment]
 
-    for event, entries in new_hooks.items():
-        current = hooks.get(event, [])
-        current_commands = {h.get("command") for h in current}
-        for entry in entries:
-            if entry.get("command") not in current_commands:
-                current.append(entry)
-        hooks[event] = current
+    for event, new_matchers in new_hooks.items():
+        current_matchers = hooks.get(event, [])
+
+        for new_matcher in new_matchers:
+            matcher_pattern = new_matcher.get("matcher", "")
+            new_hook_list = new_matcher.get("hooks", [])
+            if not isinstance(new_hook_list, list):
+                continue
+
+            # Find existing matcher with same pattern
+            existing_matcher = None
+            for m in current_matchers:
+                if m.get("matcher") == matcher_pattern:
+                    existing_matcher = m
+                    break
+
+            if existing_matcher:
+                # Merge hooks into existing matcher
+                existing_hook_list = existing_matcher.get("hooks", [])
+                if not isinstance(existing_hook_list, list):
+                    existing_hook_list = []
+                    existing_matcher["hooks"] = existing_hook_list
+
+                current_commands = {
+                    h.get("command"): h
+                    for h in existing_hook_list
+                    if isinstance(h, dict)
+                }
+                for hook in new_hook_list:
+                    if not isinstance(hook, dict):
+                        continue
+                    cmd = hook.get("command")
+                    if cmd in current_commands:
+                        # Update timeout for existing hooks on reinstall
+                        if "timeout" in hook:
+                            current_commands[cmd]["timeout"] = hook["timeout"]
+                    else:
+                        existing_hook_list.append(hook)
+            else:
+                # Add new matcher object
+                current_matchers.append(new_matcher)
+
+        hooks[event] = current_matchers
 
     return existing
 
@@ -89,8 +138,9 @@ def _remove_hooks(
     """Remove engram hooks from settings, leaving other hooks intact.
 
     *existing* is the full settings dict.
-    *hooks_to_remove* maps event names to lists of hook entries to remove
-    (matched by command string).
+    *hooks_to_remove* maps event names to lists of matcher objects (new format).
+    Each matcher object has {"matcher": "...", "hooks": [...]}.
+    Hooks are matched by command string.
 
     Returns the updated settings dict.
     """
@@ -98,13 +148,38 @@ def _remove_hooks(
     if not hooks:
         return existing
 
-    for event, entries_to_remove in hooks_to_remove.items():
+    for event, matchers_to_remove in hooks_to_remove.items():
         if event not in hooks:
             continue
-        commands_to_remove = {h.get("command") for h in entries_to_remove}
-        hooks[event] = [
-            h for h in hooks[event] if h.get("command") not in commands_to_remove
-        ]
+
+        current_matchers = hooks[event]
+
+        # Collect all commands to remove from all matcher objects
+        commands_to_remove = set()
+        for matcher in matchers_to_remove:
+            hook_list = matcher.get("hooks", [])
+            if isinstance(hook_list, list):
+                for h in hook_list:
+                    if isinstance(h, dict):
+                        commands_to_remove.add(h.get("command"))
+
+        # Remove commands from each matcher's hooks array
+        updated_matchers = []
+        for matcher in current_matchers:
+            hook_list = matcher.get("hooks", [])
+            if isinstance(hook_list, list):
+                filtered_hooks = [
+                    h for h in hook_list
+                    if not isinstance(h, dict) or h.get("command") not in commands_to_remove
+                ]
+                # Only keep matcher if it still has hooks
+                if filtered_hooks:
+                    matcher["hooks"] = filtered_hooks
+                    updated_matchers.append(matcher)
+            else:
+                updated_matchers.append(matcher)
+
+        hooks[event] = updated_matchers
 
     existing["hooks"] = hooks
     return existing

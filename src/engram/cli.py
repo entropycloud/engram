@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -150,7 +151,7 @@ def rate(ctx: click.Context, slug: str, rating: str) -> None:
 
 @main.command()
 @click.option("--event", "event_type", required=True,
-              type=click.Choice(["used", "success", "override", "feedback"]),
+              type=click.Choice(["used", "success", "override", "feedback", "session_end", "tool_use"]),
               help="Event type to record.")
 @click.option("--session", required=True, help="Session ID.")
 @click.option("--slug", required=True, help="Engram slug.")
@@ -227,16 +228,35 @@ def export_skill(ctx: click.Context, slug: str, output_path: Path | None) -> Non
 
 @main.command("select")
 @click.option("--prompt", "prompt_text", default="", help="Prompt text to match against.")
+@click.option("--prompt-file", "prompt_file", type=click.Path(path_type=Path, exists=True),
+              default=None, help="Read prompt text from a file.")
+@click.option("--from-hook", "from_hook", is_flag=True, default=False,
+              help="Read hook JSON from stdin (UserPromptSubmit provides prompt via stdin).")
 @click.option("--project", "project_path", default=None, help="Project path.")
 @click.option("--file", "files", multiple=True, help="File paths in context.")
 @click.option("--tag", "tags", multiple=True, help="Context tags.")
 @click.option("--output", "output_path", type=click.Path(path_type=Path), default=None,
               help="Write injection output to file instead of stdout.")
 @click.pass_context
-def select_cmd(ctx: click.Context, prompt_text: str, project_path: str | None,
+def select_cmd(ctx: click.Context, prompt_text: str, prompt_file: Path | None,
+               from_hook: bool, project_path: str | None,
                files: tuple[str, ...], tags: tuple[str, ...],
                output_path: Path | None) -> None:
     """Select relevant engrams for the current context."""
+    # --from-hook: read JSON from stdin (Claude Code UserPromptSubmit hook format)
+    if from_hook:
+        import json
+        import sys
+        try:
+            hook_data = json.load(sys.stdin)
+            prompt_text = hook_data.get("prompt", "")
+            if not project_path:
+                project_path = hook_data.get("cwd")
+        except (json.JSONDecodeError, OSError):
+            prompt_text = ""
+    # --prompt-file takes precedence over --prompt
+    elif prompt_file is not None:
+        prompt_text = prompt_file.read_text(encoding="utf-8").strip()
     store = _get_store(ctx.obj["store_path"])
     context = SessionContext(
         project_path=project_path,
@@ -247,6 +267,21 @@ def select_cmd(ctx: click.Context, prompt_text: str, project_path: str | None,
     selector = EngramSelector(store)
     scored = selector.select(context)
     output = selector.format_injection(scored)
+
+    # Record injection tracking and "used" signals for hook mode
+    if from_hook and scored:
+        import os
+
+        from engram.hooks import record_injection, record_signal
+
+        session_id = os.environ.get("CLAUDE_SESSION_ID", "")
+        if session_id:
+            injected_slugs = [s.slug for s in scored]
+            record_injection(store.root, session_id, injected_slugs)
+            for slug in injected_slugs:
+                record_signal(
+                    store.root, slug, "used", session_id,
+                )
 
     if output_path is not None:
         output_path.write_text(output, encoding="utf-8")
@@ -338,6 +373,38 @@ def demote(ctx: click.Context, slug: str) -> None:
 
 @main.command()
 @click.argument("slug")
+@click.pass_context
+def pin(ctx: click.Context, slug: str) -> None:
+    """Pin an engram to prevent staleness decay and archival."""
+    store = _get_store(ctx.obj["store_path"])
+    try:
+        engram = store.read(slug)
+    except FileNotFoundError:
+        raise click.ClickException(f"Engram not found: {slug}") from None
+    engram.pinned = True
+    engram.updated = datetime.now(tz=UTC)
+    store.write(engram)
+    click.echo(f"Pinned {slug}")
+
+
+@main.command()
+@click.argument("slug")
+@click.pass_context
+def unpin(ctx: click.Context, slug: str) -> None:
+    """Unpin an engram, allowing normal staleness decay."""
+    store = _get_store(ctx.obj["store_path"])
+    try:
+        engram = store.read(slug)
+    except FileNotFoundError:
+        raise click.ClickException(f"Engram not found: {slug}") from None
+    engram.pinned = False
+    engram.updated = datetime.now(tz=UTC)
+    store.write(engram)
+    click.echo(f"Unpinned {slug}")
+
+
+@main.command()
+@click.argument("slug")
 @click.argument("version", type=int)
 @click.pass_context
 def rollback(ctx: click.Context, slug: str, version: int) -> None:
@@ -406,9 +473,12 @@ def dedup(ctx: click.Context, slug: str) -> None:
 @click.option("--transcript", "transcript_path", type=click.Path(path_type=Path),
               default=None, help="Path to session JSONL transcript file.")
 @click.option("--mode", type=click.Choice(["auto", "interactive"]), default="auto")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Print the review prompt without calling the LLM.")
+@click.option("--model", default=None, help="Override LLM model name.")
 @click.pass_context
 def review(ctx: click.Context, session_id: str | None, transcript_path: Path | None,
-           mode: str) -> None:
+           mode: str, dry_run: bool, model: str | None) -> None:
     """Review a session for procedural knowledge to capture as engrams."""
     store = _get_store(ctx.obj["store_path"])
     scanner = EngramScanner()
@@ -425,16 +495,24 @@ def review(ctx: click.Context, session_id: str | None, transcript_path: Path | N
                     transcript_path = candidate
                     break
 
+    # Load injected engram slugs for this session
+    from engram.hooks import cleanup_session_file, read_session_injections
+
+    injected_slugs = read_session_injections(store.root, sid) if sid else []
+
     if transcript_path and transcript_path.exists():
         session_ctx = reviewer.build_context_from_transcript(
             transcript_path,
             project_path=str(Path.cwd()),
             session_id=sid,
         )
+        session_ctx["injected_slugs"] = injected_slugs
         prompt = reviewer.build_review_prompt(session_ctx)
         tool_calls = session_ctx.get("tool_calls", [])
         tool_count = len(tool_calls) if isinstance(tool_calls, list) else 0
         click.echo(f"Loaded transcript: {tool_count} tool call(s)")
+        if injected_slugs:
+            click.echo(f"Injected engrams: {', '.join(injected_slugs)}")
         click.echo(f"Review prompt built ({len(prompt)} chars)")
     else:
         session_ctx = {
@@ -442,16 +520,56 @@ def review(ctx: click.Context, session_id: str | None, transcript_path: Path | N
             "session_id": sid,
             "tool_calls": [],
             "outcome": "unknown",
+            "injected_slugs": injected_slugs,
         }
         prompt = reviewer.build_review_prompt(session_ctx)
         click.echo(f"Review prompt built ({len(prompt)} chars)")
 
-    click.echo(f"Mode: {mode}")
+    if dry_run:
+        click.echo(prompt)
+        return
+
     if mode == "interactive":
         click.echo("Interactive review requires Claude Code agent. Use /engram review instead.")
-    else:
-        if not transcript_path:
-            click.echo("No transcript found. Provide --transcript or --session to load one.")
+        return
+
+    # Auto mode: call LLM, parse output, execute decisions
+    from engram.llm import LLMError, call_reviewer_llm
+
+    try:
+        raw_output = call_reviewer_llm(prompt, model=model)
+    except ImportError:
+        click.echo("LLM support not installed. Run: pip install engram[llm]", err=True)
+        return
+    except LLMError as e:
+        click.echo(f"Review skipped: {e}", err=True)
+        return
+
+    try:
+        output = reviewer.parse_review_output(raw_output)
+    except ValueError as e:
+        click.echo(f"Failed to parse LLM output: {e}", err=True)
+        return
+
+    report = reviewer.execute_decisions(output, session_id=sid)
+
+    # Clean up session injection file
+    cleanup_session_file(store.root, sid)
+
+    if report.created:
+        click.echo(f"Created: {', '.join(report.created)}")
+    if report.updated:
+        click.echo(f"Updated: {', '.join(report.updated)}")
+    if report.evaluated:
+        click.echo(f"Evaluated: {', '.join(report.evaluated)}")
+    if report.blocked:
+        click.echo(f"Blocked by scanner: {', '.join(report.blocked)}")
+    for err in report.errors:
+        click.echo(f"Error: {err}", err=True)
+    if report.skipped:
+        click.echo(f"Skipped: {report.skipped}")
+    if not (report.created or report.updated or report.evaluated):
+        click.echo("No engrams created, updated, or evaluated.")
 
 
 # ------------------------------------------------------------------
