@@ -97,8 +97,8 @@ def call_reviewer_llm(
                 system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = response.content[0].text  # type: ignore[union-attr]
-            return str(text)
+            block = response.content[0]
+            return str(getattr(block, "text", ""))
         except anthropic.AuthenticationError as e:
             raise LLMError(f"Authentication failed: {e}") from e
         except anthropic.BadRequestError as e:
