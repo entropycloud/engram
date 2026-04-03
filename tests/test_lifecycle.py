@@ -699,3 +699,53 @@ class TestCLIDedup:
             main, ["--store", str(store_path), "dedup", "nonexistent"]
         )
         assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# GC: pinned engrams and underscore-prefixed metrics
+# ---------------------------------------------------------------------------
+
+
+class TestGCPinnedAndUnderscoreMetrics:
+    def test_gc_skips_pinned_deprecated(self, tmp_store: Path) -> None:
+        """Pinned deprecated engrams older than 90 days are NOT archived by GC."""
+        old_date = datetime.now(tz=UTC) - timedelta(days=91)
+        store, _ = _store_with_engram(
+            tmp_store,
+            state=EngramState.DEPRECATED,
+            updated=old_date,
+            metrics=Metrics(usage_count=0, quality_score=0.1),
+            pinned=True,
+        )
+        lm = LifecycleManager(store)
+        report = lm.run_gc()
+        assert report.archived == []
+        # Engram should still exist in the active store
+        engram = store.read("test-engram")
+        assert engram.state == EngramState.DEPRECATED
+
+    def test_gc_skips_underscore_metrics(self, tmp_store: Path) -> None:
+        """Metrics files prefixed with _ (e.g., _inj_session.jsonl) are not cleaned."""
+        store = EngramStore(tmp_store)
+        # No engrams in store, so any non-underscore metrics file is orphaned
+        metrics_dir = tmp_store / "metrics"
+        metrics_dir.mkdir(exist_ok=True)
+
+        # Create an underscore-prefixed file (injection tracking)
+        underscore_file = metrics_dir / "_inj_sess-1.jsonl"
+        underscore_file.write_text('{"ts":"2024-01-01","slugs":["a"]}\n')
+
+        # Create a regular orphan metrics file for comparison
+        orphan_file = metrics_dir / "orphan-engram.jsonl"
+        orphan_file.write_text('{"ts":"2024-01-01","event":"used","session":"x"}\n')
+
+        lm = LifecycleManager(store)
+        report = lm.run_gc()
+
+        # The underscore file should NOT be cleaned
+        assert underscore_file.exists()
+        assert "_inj_sess-1" not in report.orphan_metrics_cleaned
+
+        # The regular orphan should be cleaned
+        assert "orphan-engram" in report.orphan_metrics_cleaned
+        assert not orphan_file.exists()

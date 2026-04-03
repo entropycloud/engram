@@ -43,7 +43,9 @@ class EngramEvaluator:
                 events.append(MetricEvent.model_validate(data))
         return events
 
-    def compute_quality_score(self, events: list[MetricEvent]) -> float:
+    def compute_quality_score(
+        self, events: list[MetricEvent], *, pinned: bool = False,
+    ) -> float:
         """Compute quality score from recent metric events.
 
         Returns a float in [0.0, 1.0].
@@ -55,7 +57,7 @@ class EngramEvaluator:
         - override: score -= 0.5 * score
         - feedback up: score += 0.5 * (1 - score)
         - feedback down: score -= 0.5 * score
-        - Staleness decay if last usage > 30 days
+        - Staleness decay if last usage > 30 days (skipped for pinned engrams)
         - Clamp to [0.0, 1.0], round to 3 decimal places
         """
         recent = events[-30:]
@@ -79,8 +81,8 @@ class EngramEvaluator:
                 else:
                     score -= 0.5 * score
 
-        # Staleness decay
-        if usage_events:
+        # Staleness decay (skipped for pinned engrams)
+        if not pinned and usage_events:
             now = datetime.now(tz=UTC)
             days_since_use = (now - usage_events[-1].ts).days
             if days_since_use > 30:
@@ -94,9 +96,8 @@ class EngramEvaluator:
     def update_engram_score(self, slug: str) -> float:
         """Read events, compute score, update engram frontmatter. Returns new score."""
         events = self.read_events(slug)
-        score = self.compute_quality_score(events)
-
         engram = self._store.read(slug)
+        score = self.compute_quality_score(events, pinned=engram.pinned)
         engram.metrics.quality_score = score
         engram.metrics.last_evaluated = datetime.now(tz=UTC)
 

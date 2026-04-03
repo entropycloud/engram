@@ -121,3 +121,62 @@ class TestCLIRebuildIndex:
         assert result.exit_code == 0
         assert "2 engram(s)" in result.output
         assert (store_path / "index.json").exists()
+
+
+# ------------------------------------------------------------------
+# Pin / unpin commands
+# ------------------------------------------------------------------
+
+
+class TestCLIPin:
+    def test_pin_command(self, tmp_path: Path) -> None:
+        """engram pin <slug> sets pinned=True on the engram."""
+        store_path = tmp_path / "store"
+        store = _populate_store(store_path)
+        runner = CliRunner()
+
+        # Verify not pinned initially
+        engram = store.read("deploy-migration")
+        assert engram.pinned is False
+
+        result = runner.invoke(
+            main, ["--store", str(store_path), "pin", "deploy-migration"]
+        )
+        assert result.exit_code == 0
+        assert "Pinned" in result.output
+
+        # Verify pinned persisted
+        engram = store.read("deploy-migration")
+        assert engram.pinned is True
+
+    def test_unpin_command(self, tmp_path: Path) -> None:
+        """engram unpin <slug> sets pinned=False on the engram."""
+        store_path = tmp_path / "store"
+        store = _populate_store(store_path)
+
+        # Pin first
+        engram = store.read("deploy-migration")
+        engram.pinned = True
+        store.write(engram)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["--store", str(store_path), "unpin", "deploy-migration"]
+        )
+        assert result.exit_code == 0
+        assert "Unpinned" in result.output
+
+        # Verify unpinned persisted
+        engram = store.read("deploy-migration")
+        assert engram.pinned is False
+
+    def test_pin_nonexistent(self, tmp_path: Path) -> None:
+        """Pinning a nonexistent engram gives an error."""
+        store_path = tmp_path / "store"
+        _populate_store(store_path)
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["--store", str(store_path), "pin", "nonexistent"]
+        )
+        assert result.exit_code != 0
+        assert "not found" in result.output.lower()

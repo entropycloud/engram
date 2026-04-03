@@ -33,8 +33,14 @@ htmlcov/
 Thumbs.db
 
 # Engram runtime (not repo content)
+.engram/
 .session_state/
 review.log
 rejected.jsonl
 store.lock
 .claude/worktrees/
+.claude/settings.json
+.claude/skills/
+
+# Internal working docs
+projectDocs

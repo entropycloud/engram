@@ -71,6 +71,33 @@ class EngramReviewer:
         # Format tool calls as JSON for the prompt
         tool_calls_text = json.dumps(tool_calls, indent=2) if tool_calls else "(none)"
 
+        # Build injected engrams section if any were active this session
+        raw_injected = session_context.get("injected_slugs", [])
+        injected_slugs: list[str] = (
+            list(raw_injected) if isinstance(raw_injected, (list, tuple)) else []
+        )
+        injected_section = ""
+        if injected_slugs:
+            lines = [
+                "\n## Injected Engrams (active this session)",
+                "These engrams were injected into the session context. "
+                "Evaluate whether the assistant followed each one:",
+            ]
+            for slug in injected_slugs:
+                maybe_entry = index.engrams.get(slug)
+                desc = maybe_entry.description if maybe_entry else "(unknown)"
+                lines.append(f"- {slug}: {desc}")
+            lines.append(
+                '\nFor each injected engram, add an "evaluate" decision '
+                "with:\n"
+                '- "action": "evaluate"\n'
+                '- "target": "<slug>"\n'
+                '- "outcome": "success" (followed) | "override" '
+                '(ignored) | "unused" (not relevant)\n'
+                '- "reason": "brief explanation"'
+            )
+            injected_section = "\n".join(lines)
+
         prompt = f"""You are the Engram Reviewer. Your job is to analyze a Claude Code session \
 transcript and decide what procedural knowledge to capture as engrams.
 
@@ -81,6 +108,7 @@ transcript and decide what procedural knowledge to capture as engrams.
 
 ## Existing Engrams (for deduplication)
 {engram_index}
+{injected_section}
 
 ## Session Transcript (tool calls)
 {tool_calls_text}
@@ -97,10 +125,11 @@ Respond with a JSON object matching this schema:
 {{
   "decisions": [
     {{
-      "action": "create" | "update" | "skip",
+      "action": "create" | "update" | "skip" | "evaluate",
       "engram": {{...}}  // For create: full Engram object
-      "target": "slug",  // For update: slug of existing engram
+      "target": "slug",  // For update/evaluate: slug of engram
       "patch": {{...}},  // For update: patch data
+      "outcome": "success" | "override" | "unused",  // For evaluate only
       "reason": "why"
     }}
   ]
@@ -139,11 +168,12 @@ For "update" decisions, provide patch_type ("append", "replace_section", \
         output: ReviewOutput,
         session_id: str = "",
     ) -> ReviewReport:
-        """Execute reviewer decisions: create new engrams, update existing ones.
+        """Execute reviewer decisions: create, update, evaluate, or skip.
 
         For each decision:
         - "create": Scan the engram, write to store if allowed
         - "update": Load existing, apply fuzzy patch, scan result, write if allowed
+        - "evaluate": Record success/override signal and update score
         - "skip": Count it
 
         Blocked engrams (scanner rejects) are logged in the report.
@@ -158,6 +188,8 @@ For "update" decisions, provide patch_type ("append", "replace_section", \
                 self._execute_create(decision, report)
             elif decision.action == "update":
                 self._execute_update(decision, report)
+            elif decision.action == "evaluate":
+                self._execute_evaluate(decision, report, session_id)
 
         return report
 
@@ -352,3 +384,37 @@ For "update" decisions, provide patch_type ("append", "replace_section", \
 
         self._store.write(updated)
         report.updated.append(decision.target)
+
+    def _execute_evaluate(
+        self,
+        decision: ReviewDecision,
+        report: ReviewReport,
+        session_id: str,
+    ) -> None:
+        """Execute an evaluate decision — record success/override signal."""
+        if decision.target is None:
+            report.errors.append("Evaluate decision missing target slug")
+            return
+        if decision.outcome is None or decision.outcome == "unused":
+            return
+
+        from engram.evaluator import EngramEvaluator
+        from engram.hooks import record_signal
+
+        try:
+            self._store.read(decision.target)
+        except FileNotFoundError:
+            report.errors.append(
+                f"Engram not found for evaluate: {decision.target}"
+            )
+            return
+
+        record_signal(
+            self._store.root,
+            decision.target,
+            decision.outcome,
+            session_id,
+        )
+        evaluator = EngramEvaluator(self._store)
+        evaluator.update_engram_score(decision.target)
+        report.evaluated.append(decision.target)

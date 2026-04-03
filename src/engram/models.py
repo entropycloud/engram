@@ -73,11 +73,20 @@ class Engram(BaseModel):
     state: EngramState = EngramState.DRAFT
     created: datetime
     updated: datetime
+    pinned: bool = False
     supersedes: str | None = None
     superseded_by: str | None = None
 
     # Activation
     triggers: Triggers = Field(default_factory=Triggers)
+
+    @field_validator("triggers", mode="before")
+    @classmethod
+    def _coerce_triggers(cls, v: Any) -> Any:
+        """Accept a flat list of strings as tags-only triggers."""
+        if isinstance(v, list):
+            return {"tags": v}
+        return v
 
     # Trust & Security
     trust: TrustLevel = TrustLevel.AGENT_CREATED
@@ -108,7 +117,7 @@ class MetricEvent(BaseModel):
     """A single metric event recorded in a JSONL sidecar."""
 
     ts: datetime
-    event: Literal["used", "success", "override", "feedback"]
+    event: Literal["used", "success", "override", "feedback", "session_end", "tool_use"]
     session: str
     context: str | None = None
     detail: str | None = None
@@ -128,6 +137,7 @@ class IndexEntry(BaseModel):
     files: list[str]
     updated: datetime
     version: int
+    pinned: bool = False
 
     @classmethod
     def from_engram(cls, engram: Engram) -> IndexEntry:
@@ -142,6 +152,7 @@ class IndexEntry(BaseModel):
             files=engram.triggers.files,
             updated=engram.updated,
             version=engram.version,
+            pinned=engram.pinned,
         )
 
 
@@ -218,12 +229,14 @@ class ScoredEngram(BaseModel):
 class ReviewDecision(BaseModel):
     """A single decision from the Reviewer."""
 
-    action: Literal["create", "update", "skip"]
+    action: Literal["create", "update", "skip", "evaluate"]
     # For create:
     engram: Engram | None = None
     # For update:
     target: str | None = None  # slug of engram to update
     patch: dict[str, Any] | None = None  # patch data
+    # For evaluate:
+    outcome: Literal["success", "override", "unused"] | None = None
     # Common:
     reason: str = ""
 
@@ -239,6 +252,7 @@ class ReviewReport(BaseModel):
 
     created: list[str] = Field(default_factory=list)  # slugs created
     updated: list[str] = Field(default_factory=list)  # slugs updated
+    evaluated: list[str] = Field(default_factory=list)  # slugs evaluated
     skipped: int = 0
     blocked: list[str] = Field(default_factory=list)  # slugs blocked by scanner
     errors: list[str] = Field(default_factory=list)

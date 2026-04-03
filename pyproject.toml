@@ -21,7 +21,7 @@ dev = [
     "mypy>=1.10",
 ]
 llm = [
-    "anthropic>=0.30",
+    "anthropic[bedrock]>=0.30",
 ]
 
 [project.scripts]
@@ -49,4 +49,8 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "yaml.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "anthropic.*"
 ignore_missing_imports = true
