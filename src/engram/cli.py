@@ -158,14 +158,26 @@ def rate(ctx: click.Context, slug: str, rating: str) -> None:
     ]),
     help="Event type to record.",
 )
-@click.option("--session", required=True, help="Session ID.")
+@click.option("--session", default=None, help="Session ID.")
 @click.option("--slug", required=True, help="Engram slug.")
 @click.option("--context", default=None, help="Context string.")
 @click.option("--detail", default=None, help="Detail string.")
+@click.option("--from-hook", is_flag=True, default=False,
+              help="Read session ID from Claude Code hook JSON on stdin.")
 @click.pass_context
-def signal(ctx: click.Context, event_type: str, session: str, slug: str,
-           context: str | None, detail: str | None) -> None:
+def signal(ctx: click.Context, event_type: str, session: str | None, slug: str,
+           context: str | None, detail: str | None, from_hook: bool) -> None:
     """Record a signal (used by hooks)."""
+    if from_hook:
+        import json
+        import sys
+        try:
+            hook_data = json.load(sys.stdin)
+            if not session:
+                session = hook_data.get("session_id", "")
+        except (json.JSONDecodeError, OSError):
+            pass
+    session = session or ""
     store = _get_store(ctx.obj["store_path"])
     record_signal(store.root, slug, event_type, session, context=context, detail=detail)
     click.echo(f"Recorded {event_type} for {slug}")
@@ -275,11 +287,9 @@ def select_cmd(ctx: click.Context, prompt_text: str, prompt_file: Path | None,
 
     # Record injection tracking and "used" signals for hook mode
     if from_hook and scored:
-        import os
-
         from engram.hooks import record_injection, record_signal
 
-        session_id = os.environ.get("CLAUDE_SESSION_ID", "")
+        session_id = hook_data.get("session_id", "") if from_hook else ""
         if session_id:
             injected_slugs = [s.slug for s in scored]
             record_injection(store.root, session_id, injected_slugs)
@@ -481,10 +491,21 @@ def dedup(ctx: click.Context, slug: str) -> None:
 @click.option("--dry-run", is_flag=True, default=False,
               help="Print the review prompt without calling the LLM.")
 @click.option("--model", default=None, help="Override LLM model name.")
+@click.option("--from-hook", is_flag=True, default=False,
+              help="Read session ID from Claude Code hook JSON on stdin.")
 @click.pass_context
 def review(ctx: click.Context, session_id: str | None, transcript_path: Path | None,
-           mode: str, dry_run: bool, model: str | None) -> None:
+           mode: str, dry_run: bool, model: str | None, from_hook: bool) -> None:
     """Review a session for procedural knowledge to capture as engrams."""
+    if from_hook:
+        import json
+        import sys
+        try:
+            hook_data = json.load(sys.stdin)
+            if not session_id:
+                session_id = hook_data.get("session_id")
+        except (json.JSONDecodeError, OSError):
+            pass
     store = _get_store(ctx.obj["store_path"])
     scanner = EngramScanner()
     reviewer = EngramReviewer(store, scanner=scanner)

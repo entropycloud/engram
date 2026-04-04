@@ -20,17 +20,14 @@ HOOK_CONFIG: dict[str, dict[str, list[dict[str, object]]]] = {
                 "hooks": [
                     {
                         "type": "command",
-                        "command": (
-                            "engram review --session=$CLAUDE_SESSION_ID"
-                            " --mode=auto"
-                        ),
+                        "command": "engram review --from-hook --mode=auto",
                         "timeout": 30000,
                     },
                     {
                         "type": "command",
                         "command": (
                             "engram signal --event=session_end"
-                            " --session=$CLAUDE_SESSION_ID --slug=_session"
+                            " --from-hook --slug=_session"
                         ),
                         "timeout": 1000,
                     },
@@ -45,7 +42,7 @@ HOOK_CONFIG: dict[str, dict[str, list[dict[str, object]]]] = {
                         "type": "command",
                         "command": (
                             "engram signal --event=tool_use"
-                            " --session=$CLAUDE_SESSION_ID --slug=_session"
+                            " --from-hook --slug=_session"
                         ),
                         "timeout": 1000,
                     },
