@@ -76,7 +76,7 @@ class TestMergeHooks:
         first = _merge_hooks({}, HOOK_CONFIG["hooks"])
         second = _merge_hooks(first, HOOK_CONFIG["hooks"])
         assert len(second["hooks"]["Stop"]) == len(first["hooks"]["Stop"])
-        assert len(second["hooks"]["PostToolUse"]) == len(first["hooks"]["PostToolUse"])
+        assert len(second["hooks"]["UserPromptSubmit"]) == len(first["hooks"]["UserPromptSubmit"])
 
     def test_merge_preserves_non_hook_settings(self) -> None:
         existing = {"model": "claude-opus-4-0-20250514", "hooks": {}}

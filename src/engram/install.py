@@ -34,21 +34,6 @@ HOOK_CONFIG: dict[str, dict[str, list[dict[str, object]]]] = {
                 ],
             },
         ],
-        "PostToolUse": [
-            {
-                "matcher": "",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": (
-                            "engram signal --event=tool_use"
-                            " --from-hook --slug=_session"
-                        ),
-                        "timeout": 1000,
-                    },
-                ],
-            },
-        ],
         "UserPromptSubmit": [
             {
                 "matcher": "",
