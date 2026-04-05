@@ -20,8 +20,8 @@ HOOK_CONFIG: dict[str, dict[str, list[dict[str, object]]]] = {
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "engram review --from-hook --mode=auto",
-                        "timeout": 30000,
+                        "command": "engram review --from-hook --mode=auto --background",
+                        "timeout": 5000,
                     },
                     {
                         "type": "command",
@@ -204,7 +204,7 @@ def install_claude_code_integration(
     """Install Engram's Claude Code integration.
 
     1. Copy skill file to target .claude/skills/engram/SKILL.md
-    2. Copy agent file to ~/.claude/agents/engram-reviewer.md (always global)
+    2. Copy agent file to target .claude/agents/engram-reviewer.md
     3. Create engram store directories
     4. Merge hook configuration into settings.json (don't overwrite existing hooks)
 
@@ -232,8 +232,11 @@ def install_claude_code_integration(
     shutil.copy2(_SKILL_SRC, skill_dest)
     created.append(str(skill_dest))
 
-    # 2. Copy agent file (always global)
-    agent_dest = home_claude / "agents" / "engram-reviewer.md"
+    # 2. Copy agent file (scoped to install target)
+    if global_install:
+        agent_dest = home_claude / "agents" / "engram-reviewer.md"
+    else:
+        agent_dest = base_claude / "agents" / "engram-reviewer.md"
     agent_dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(_AGENT_SRC, agent_dest)
     created.append(str(agent_dest))
@@ -289,8 +292,11 @@ def uninstall_claude_code_integration(
         if skill_dir.exists() and not any(skill_dir.iterdir()):
             skill_dir.rmdir()
 
-    # 2. Remove agent file
-    agent_dest = home_claude / "agents" / "engram-reviewer.md"
+    # 2. Remove agent file (scoped to install target)
+    if global_install:
+        agent_dest = home_claude / "agents" / "engram-reviewer.md"
+    else:
+        agent_dest = base_claude / "agents" / "engram-reviewer.md"
     if agent_dest.exists():
         agent_dest.unlink()
         removed.append(str(agent_dest))

@@ -258,6 +258,14 @@ For "update" decisions, provide patch_type ("append", "replace_section", \
             filtered = filtered[-last_n:]
         return filtered
 
+    # Maximum tool calls to include in the review prompt.
+    # Keeps LLM prompt size reasonable for long sessions.
+    MAX_TOOL_CALLS = 50
+
+    # Maximum characters per tool input to include.
+    # Large file reads / outputs are truncated.
+    MAX_INPUT_CHARS = 500
+
     def build_context_from_transcript(
         self,
         session_path: Path,
@@ -282,10 +290,21 @@ For "update" decisions, provide patch_type ("append", "replace_section", \
             if isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "tool_use":
+                        raw_input = block.get("input", {})
+                        # Truncate large tool inputs
+                        input_str = str(raw_input)
+                        if len(input_str) > self.MAX_INPUT_CHARS:
+                            truncated_input = input_str[:self.MAX_INPUT_CHARS] + "...(truncated)"
+                        else:
+                            truncated_input = raw_input
                         tool_calls.append({
                             "tool": block.get("name", ""),
-                            "input": block.get("input", {}),
+                            "input": truncated_input,
                         })
+
+        # Keep only the last N tool calls for the LLM prompt
+        if len(tool_calls) > self.MAX_TOOL_CALLS:
+            tool_calls = tool_calls[-self.MAX_TOOL_CALLS:]
 
         return {
             "project_path": project_path,

@@ -5,24 +5,77 @@ from __future__ import annotations
 from engram.models import Engram, IndexEntry
 
 
-def format_engram_table(engrams: dict[str, IndexEntry]) -> str:
-    """Format engrams as a human-readable table for CLI output."""
+def format_engram_table(
+    engrams: dict[str, IndexEntry],
+    location: str | None = None,
+) -> str:
+    """Format engrams as a human-readable table for CLI output.
+
+    If *location* is provided, a Location column is added to each row.
+    """
     if not engrams:
         return "No engrams found."
 
-    # Column headers
-    lines = [
-        f"{'Name':<35} {'State':<12} {'Trust':<15} {'Score':>6} {'Ver':>4}",
-        "-" * 76,
-    ]
+    show_loc = location is not None
+
+    if show_loc:
+        header = (
+            f"{'Name':<35} {'Location':<9} {'State':<12} "
+            f"{'Trust':<15} {'Score':>6} {'Ver':>4}"
+        )
+        sep = "-" * 86
+    else:
+        header = (
+            f"{'Name':<35} {'State':<12} {'Trust':<15} {'Score':>6} {'Ver':>4}"
+        )
+        sep = "-" * 76
+
+    lines = [header, sep]
 
     for slug, entry in sorted(engrams.items()):
-        lines.append(
-            f"{slug:<35} {entry.state.value:<12} {entry.trust.value:<15} "
-            f"{entry.quality_score:>5.2f} {entry.version:>4}"
-        )
+        if show_loc:
+            lines.append(
+                f"{slug:<35} {location:<9} {entry.state.value:<12} "
+                f"{entry.trust.value:<15} {entry.quality_score:>5.2f} "
+                f"{entry.version:>4}"
+            )
+        else:
+            lines.append(
+                f"{slug:<35} {entry.state.value:<12} {entry.trust.value:<15} "
+                f"{entry.quality_score:>5.2f} {entry.version:>4}"
+            )
 
     lines.append(f"\n{len(engrams)} engram(s)")
+    return "\n".join(lines)
+
+
+def format_engram_table_multi(
+    sections: list[tuple[str, dict[str, IndexEntry]]],
+) -> str:
+    """Format engrams from multiple stores with a Location column.
+
+    *sections* is a list of (location_label, engrams_dict) tuples.
+    """
+    total = 0
+    header = (
+        f"{'Name':<35} {'Location':<9} {'State':<12} "
+        f"{'Trust':<15} {'Score':>6} {'Ver':>4}"
+    )
+    lines = [header, "-" * 86]
+
+    for label, engrams in sections:
+        for slug, entry in sorted(engrams.items()):
+            lines.append(
+                f"{slug:<35} {label:<9} {entry.state.value:<12} "
+                f"{entry.trust.value:<15} {entry.quality_score:>5.2f} "
+                f"{entry.version:>4}"
+            )
+            total += 1
+
+    if total == 0:
+        return "No engrams found."
+
+    lines.append(f"\n{total} engram(s)")
     return "\n".join(lines)
 
 

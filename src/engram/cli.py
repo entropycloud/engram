@@ -10,7 +10,7 @@ import frontmatter
 
 from engram import __version__
 from engram.evaluator import EngramEvaluator
-from engram.formatting import format_engram_detail, format_engram_table
+from engram.formatting import format_engram_detail, format_engram_table, format_engram_table_multi
 from engram.hooks import record_feedback, record_signal
 from engram.lifecycle import LifecycleManager
 from engram.models import Engram, EngramState, SessionContext
@@ -19,17 +19,33 @@ from engram.scanner import EngramScanner
 from engram.selector import EngramSelector
 from engram.store import EngramStore
 
-# Default store paths
+# Default global store path (used only when no project store is found)
 GLOBAL_STORE_PATH = Path.home() / ".claude" / "engrams"
-PROJECT_STORE_PATH = Path.cwd() / ".engram"
+
+
+def _find_project_store() -> Path | None:
+    """Walk up from cwd looking for a .engram/ directory."""
+    current = Path.cwd()
+    for parent in (current, *current.parents):
+        candidate = parent / ".engram"
+        if candidate.is_dir():
+            return candidate
+    return None
 
 
 def _get_store(store_path: Path | None = None) -> EngramStore:
-    """Get an EngramStore, creating directories if needed."""
-    path = store_path or GLOBAL_STORE_PATH
+    """Get an EngramStore with project-local auto-detection.
+
+    Resolution order:
+    1. Explicit ``store_path`` argument (from --store flag)
+    2. ``.engram/`` found by walking up from cwd
+    3. Fall back to ``~/.claude/engrams`` (global)
+    """
+    if store_path is None:
+        store_path = _find_project_store() or GLOBAL_STORE_PATH
     for subdir in ("engram", "archive", "metrics", "versions"):
-        (path / subdir).mkdir(parents=True, exist_ok=True)
-    return EngramStore(path)
+        (store_path / subdir).mkdir(parents=True, exist_ok=True)
+    return EngramStore(store_path)
 
 
 @click.group()
@@ -51,17 +67,42 @@ def main(ctx: click.Context, store_path: Path | None) -> None:
 @click.pass_context
 def list_cmd(ctx: click.Context, state: str | None, tag: str | None) -> None:
     """List engrams with optional filters."""
-    store = _get_store(ctx.obj["store_path"])
-    index = store.read_index()
-    engrams = dict(index.engrams)
 
-    if state:
-        engrams = {k: v for k, v in engrams.items() if v.state.value == state}
+    def _filter(engrams: dict[str, object], state: str | None, tag: str | None) -> dict[str, object]:  # type: ignore[type-arg]
+        if state:
+            engrams = {k: v for k, v in engrams.items() if v.state.value == state}  # type: ignore[union-attr]
+        if tag:
+            engrams = {k: v for k, v in engrams.items() if tag in v.tags}  # type: ignore[union-attr]
+        return engrams
 
-    if tag:
-        engrams = {k: v for k, v in engrams.items() if tag in v.tags}
+    explicit_store = ctx.obj["store_path"]
+    project_store_path = _find_project_store()
 
-    click.echo(format_engram_table(engrams))
+    if explicit_store:
+        # Explicit --store: show just that store, no location column
+        store = _get_store(explicit_store)
+        engrams = _filter(dict(store.read_index().engrams), state, tag)
+        click.echo(format_engram_table(engrams))  # type: ignore[arg-type]
+    elif project_store_path:
+        # In a project: show both project and global
+        sections: list[tuple[str, dict]] = []  # type: ignore[type-arg]
+
+        proj_store = EngramStore(project_store_path)
+        proj_engrams = _filter(dict(proj_store.read_index().engrams), state, tag)
+        sections.append(("project", proj_engrams))  # type: ignore[arg-type]
+
+        if GLOBAL_STORE_PATH.exists():
+            glob_store = EngramStore(GLOBAL_STORE_PATH)
+            glob_engrams = _filter(dict(glob_store.read_index().engrams), state, tag)
+            if glob_engrams:
+                sections.append(("global", glob_engrams))  # type: ignore[arg-type]
+
+        click.echo(format_engram_table_multi(sections))  # type: ignore[arg-type]
+    else:
+        # No project store: show global only, no location column
+        store = _get_store(None)
+        engrams = _filter(dict(store.read_index().engrams), state, tag)
+        click.echo(format_engram_table(engrams))  # type: ignore[arg-type]
 
 
 @main.command()
@@ -298,6 +339,12 @@ def select_cmd(ctx: click.Context, prompt_text: str, prompt_file: Path | None,
                     store.root, slug, "used", session_id,
                 )
 
+    # Check for completed background reviews and notify user
+    if from_hook:
+        review_summary = _check_pending_reviews(store.root)
+        if review_summary:
+            click.echo(review_summary)
+
     if output_path is not None:
         output_path.write_text(output, encoding="utf-8")
         click.echo(f"Wrote {len(scored)} engram(s) to {output_path}")
@@ -493,28 +540,102 @@ def dedup(ctx: click.Context, slug: str) -> None:
 @click.option("--model", default=None, help="Override LLM model name.")
 @click.option("--from-hook", is_flag=True, default=False,
               help="Read session ID from Claude Code hook JSON on stdin.")
+@click.option("--background", is_flag=True, default=False,
+              help="Fork review into a background process and exit immediately.")
 @click.pass_context
 def review(ctx: click.Context, session_id: str | None, transcript_path: Path | None,
-           mode: str, dry_run: bool, model: str | None, from_hook: bool) -> None:
+           mode: str, dry_run: bool, model: str | None, from_hook: bool,
+           background: bool) -> None:
     """Review a session for procedural knowledge to capture as engrams."""
+    hook_data: dict[str, object] = {}
     if from_hook:
         import json
         import sys
         try:
             hook_data = json.load(sys.stdin)
             if not session_id:
-                session_id = hook_data.get("session_id")
+                session_id = hook_data.get("session_id")  # type: ignore[assignment]
+            if not transcript_path:
+                tp = hook_data.get("transcript_path")
+                if tp:
+                    transcript_path = Path(str(tp))
         except (json.JSONDecodeError, OSError):
             pass
-    store = _get_store(ctx.obj["store_path"])
+
+    # Background mode: fork a child process and exit immediately
+    if background:
+        _fork_background_review(
+            session_id=session_id,
+            transcript_path=transcript_path,
+            model=model,
+            store_path=ctx.obj["store_path"],
+        )
+        return
+
+    _run_review(
+        session_id=session_id,
+        transcript_path=transcript_path,
+        mode=mode,
+        dry_run=dry_run,
+        model=model,
+        store_path=ctx.obj["store_path"],
+    )
+
+
+def _fork_background_review(
+    session_id: str | None,
+    transcript_path: Path | None,
+    model: str | None,
+    store_path: Path | None,
+) -> None:
+    """Fork a background process to run the review, then exit immediately."""
+    import subprocess
+    import sys
+
+    cmd = [sys.executable, "-m", "engram.cli", "review", "--mode=auto"]
+    if session_id:
+        cmd.extend(["--session", session_id])
+    if transcript_path:
+        cmd.extend(["--transcript", str(transcript_path)])
+    if model:
+        cmd.extend(["--model", model])
+    if store_path:
+        cmd.extend(["--store", str(store_path)])
+
+    # Resolve the store for writing the review log
+    store = _get_store(store_path)
+    reviews_dir = store.root / "reviews"
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    log_path = reviews_dir / f"{session_id or 'unknown'}.log"
+
+    log_file = open(log_path, "w", encoding="utf-8")  # noqa: SIM115
+    subprocess.Popen(  # noqa: S603
+        cmd,
+        stdout=log_file,
+        stderr=log_file,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    click.echo(f"Engram review started in background (log: {log_path})")
+
+
+def _run_review(
+    session_id: str | None,
+    transcript_path: Path | None,
+    mode: str,
+    dry_run: bool,
+    model: str | None,
+    store_path: Path | None,
+) -> None:
+    """Run the review synchronously (used by both foreground and background)."""
+    store = _get_store(store_path)
     scanner = EngramScanner()
-    reviewer = EngramReviewer(store, scanner=scanner)
+    reviewer_obj = EngramReviewer(store, scanner=scanner)
 
     sid = session_id or "cli-review"
 
     # Try to find transcript if not explicitly provided
     if transcript_path is None and session_id:
-        # Search standard Claude Code session locations
         for projects_dir in (Path.home() / ".claude" / "projects",):
             if projects_dir.exists():
                 for candidate in projects_dir.rglob(f"{session_id}.jsonl"):
@@ -527,13 +648,13 @@ def review(ctx: click.Context, session_id: str | None, transcript_path: Path | N
     injected_slugs = read_session_injections(store.root, sid) if sid else []
 
     if transcript_path and transcript_path.exists():
-        session_ctx = reviewer.build_context_from_transcript(
+        session_ctx = reviewer_obj.build_context_from_transcript(
             transcript_path,
             project_path=str(Path.cwd()),
             session_id=sid,
         )
         session_ctx["injected_slugs"] = injected_slugs
-        prompt = reviewer.build_review_prompt(session_ctx)
+        prompt = reviewer_obj.build_review_prompt(session_ctx)
         tool_calls = session_ctx.get("tool_calls", [])
         tool_count = len(tool_calls) if isinstance(tool_calls, list) else 0
         click.echo(f"Loaded transcript: {tool_count} tool call(s)")
@@ -548,7 +669,7 @@ def review(ctx: click.Context, session_id: str | None, transcript_path: Path | N
             "outcome": "unknown",
             "injected_slugs": injected_slugs,
         }
-        prompt = reviewer.build_review_prompt(session_ctx)
+        prompt = reviewer_obj.build_review_prompt(session_ctx)
         click.echo(f"Review prompt built ({len(prompt)} chars)")
 
     if dry_run:
@@ -572,15 +693,18 @@ def review(ctx: click.Context, session_id: str | None, transcript_path: Path | N
         return
 
     try:
-        output = reviewer.parse_review_output(raw_output)
+        output = reviewer_obj.parse_review_output(raw_output)
     except ValueError as e:
         click.echo(f"Failed to parse LLM output: {e}", err=True)
         return
 
-    report = reviewer.execute_decisions(output, session_id=sid)
+    report = reviewer_obj.execute_decisions(output, session_id=sid)
 
     # Clean up session injection file
     cleanup_session_file(store.root, sid)
+
+    # Write review result for next-session notification
+    _write_review_result(store.root, sid, report)
 
     if report.created:
         click.echo(f"Created: {', '.join(report.created)}")
@@ -596,6 +720,69 @@ def review(ctx: click.Context, session_id: str | None, transcript_path: Path | N
         click.echo(f"Skipped: {report.skipped}")
     if not (report.created or report.updated or report.evaluated):
         click.echo("No engrams created, updated, or evaluated.")
+
+
+def _write_review_result(
+    store_root: Path, session_id: str, report: object
+) -> None:
+    """Write a review result JSON for next-session notification."""
+    import json
+
+    reviews_dir = store_root / "reviews"
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    result = {
+        "session_id": session_id,
+        "ts": datetime.now(tz=UTC).isoformat(),
+        "created": getattr(report, "created", []),
+        "updated": getattr(report, "updated", []),
+        "evaluated": getattr(report, "evaluated", []),
+        "skipped": getattr(report, "skipped", 0),
+        "errors": getattr(report, "errors", []),
+    }
+    result_path = reviews_dir / f"{session_id}.json"
+    result_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+
+
+def _check_pending_reviews(store_root: Path) -> str:
+    """Check for completed background reviews and return a summary.
+
+    Consumes (deletes) the review result files after reading them.
+    """
+    import json
+
+    reviews_dir = store_root / "reviews"
+    if not reviews_dir.exists():
+        return ""
+
+    summaries: list[str] = []
+    for result_file in reviews_dir.glob("*.json"):
+        try:
+            data = json.loads(result_file.read_text(encoding="utf-8"))
+            parts: list[str] = []
+            if data.get("created"):
+                parts.append(f"created: {', '.join(data['created'])}")
+            if data.get("updated"):
+                parts.append(f"updated: {', '.join(data['updated'])}")
+            if data.get("evaluated"):
+                parts.append(f"evaluated: {', '.join(data['evaluated'])}")
+            if data.get("errors"):
+                parts.append(f"errors: {len(data['errors'])}")
+            if parts:
+                summaries.append(f"[engram review] {'; '.join(parts)}")
+            result_file.unlink()
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    # Also clean up any .log files from background processes
+    for log_file in reviews_dir.glob("*.log"):
+        try:
+            log_file.unlink()
+        except OSError:
+            pass
+
+    if not summaries:
+        return ""
+    return "\n".join(summaries)
 
 
 # ------------------------------------------------------------------

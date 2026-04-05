@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from engram.cli import main
+from engram.cli import _find_project_store, main
 from engram.install import (
     HOOK_CONFIG,
     _merge_hooks,
@@ -237,15 +237,17 @@ class TestInstallProject:
         skill_path = project_dir / ".claude" / "skills" / "engram" / "SKILL.md"
         assert skill_path.exists()
 
-    def test_creates_agent_globally_even_for_project_install(
+    def test_creates_agent_in_project_not_global(
         self, fake_home: Path, project_dir: Path
     ) -> None:
-        """Agent file is always global, even for project installs."""
+        """Project install puts agent file in project, not ~/.claude/."""
         install_claude_code_integration(
             global_install=False, project_path=project_dir
         )
-        agent_path = fake_home / ".claude" / "agents" / "engram-reviewer.md"
-        assert agent_path.exists()
+        project_agent = project_dir / ".claude" / "agents" / "engram-reviewer.md"
+        global_agent = fake_home / ".claude" / "agents" / "engram-reviewer.md"
+        assert project_agent.exists()
+        assert not global_agent.exists()
 
     def test_settings_in_project_dir(
         self, fake_home: Path, project_dir: Path
@@ -257,6 +259,18 @@ class TestInstallProject:
         assert settings_path.exists()
         settings = json.loads(settings_path.read_text())
         assert "hooks" in settings
+
+    def test_project_install_does_not_touch_home_claude(
+        self, fake_home: Path, project_dir: Path
+    ) -> None:
+        """Project install must not create anything under ~/.claude/."""
+        install_claude_code_integration(
+            global_install=False, project_path=project_dir
+        )
+        home_claude = fake_home / ".claude"
+        if home_claude.exists():
+            contents = list(home_claude.rglob("*"))
+            assert not contents, f"Project install wrote to ~/.claude/: {contents}"
 
     def test_creates_project_store_dir(
         self, fake_home: Path, project_dir: Path
@@ -358,6 +372,18 @@ class TestUninstallProject:
         skill_path = project_dir / ".claude" / "skills" / "engram" / "SKILL.md"
         assert not skill_path.exists()
 
+    def test_removes_agent_from_project(
+        self, fake_home: Path, project_dir: Path
+    ) -> None:
+        install_claude_code_integration(
+            global_install=False, project_path=project_dir
+        )
+        uninstall_claude_code_integration(
+            global_install=False, project_path=project_dir
+        )
+        agent_path = project_dir / ".claude" / "agents" / "engram-reviewer.md"
+        assert not agent_path.exists()
+
     def test_preserves_project_engram_data(
         self, fake_home: Path, project_dir: Path
     ) -> None:
@@ -406,3 +432,47 @@ class TestCLIUninstall:
         runner.invoke(main, ["install"])
         result = runner.invoke(main, ["uninstall"])
         assert "preserved" in result.output.lower()
+
+
+# ------------------------------------------------------------------ #
+# _find_project_store auto-detection
+# ------------------------------------------------------------------ #
+
+
+class TestFindProjectStore:
+    def test_finds_engram_dir_in_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = tmp_path / ".engram"
+        store.mkdir()
+        monkeypatch.chdir(tmp_path)
+        assert _find_project_store() == store
+
+    def test_finds_engram_dir_in_ancestor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = tmp_path / ".engram"
+        store.mkdir()
+        subdir = tmp_path / "src" / "deep"
+        subdir.mkdir(parents=True)
+        monkeypatch.chdir(subdir)
+        assert _find_project_store() == store
+
+    def test_returns_none_when_no_engram_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        assert _find_project_store() is None
+
+    def test_finds_nearest_engram_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nested projects: finds the innermost .engram/ first."""
+        outer = tmp_path / ".engram"
+        outer.mkdir()
+        inner_project = tmp_path / "sub"
+        inner_project.mkdir()
+        inner = inner_project / ".engram"
+        inner.mkdir()
+        monkeypatch.chdir(inner_project)
+        assert _find_project_store() == inner
