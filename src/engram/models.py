@@ -118,7 +118,7 @@ class MetricEvent(BaseModel):
     """A single metric event recorded in a JSONL sidecar."""
 
     ts: datetime
-    event: Literal["used", "success", "override", "feedback", "session_end", "tool_use"]
+    event: Literal["used", "success", "override", "feedback", "session_end", "tool_use", "relevant"]
     session: str
     context: str | None = None
     detail: str | None = None
