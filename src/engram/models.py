@@ -44,6 +44,7 @@ class Metrics(BaseModel):
     usage_count: int = 0
     success_count: int = 0
     override_count: int = 0
+    relevant_count: int = 0
     last_used: datetime | None = None
     last_evaluated: datetime | None = None
     quality_score: float = Field(default=0.0, ge=0.0, le=1.0)

@@ -104,10 +104,11 @@ class EngramEvaluator:
         engram.metrics.quality_score = score
         engram.metrics.last_evaluated = datetime.now(tz=UTC)
 
-        # Update usage/success/override counts from all events (not just window)
+        # Update usage/success/override/relevant counts from all events (not just window)
         engram.metrics.usage_count = sum(1 for e in events if e.event == "used")
         engram.metrics.success_count = sum(1 for e in events if e.event == "success")
         engram.metrics.override_count = sum(1 for e in events if e.event == "override")
+        engram.metrics.relevant_count = sum(1 for e in events if e.event == "relevant")
         if events:
             usage_events = [e for e in events if e.event == "used"]
             if usage_events:

@@ -53,12 +53,15 @@ class LifecycleManager:
             m = engram.metrics
 
             if engram.state == EngramState.DRAFT:
-                if m.usage_count >= 3 and m.quality_score >= 0.5:
+                # Drafts are never injected so usage_count stays 0.
+                # Use success + relevant signal count instead.
+                signal_count = m.success_count + getattr(m, "relevant_count", 0)
+                if signal_count >= 3 and m.quality_score >= 0.5:
                     proposals.append(TransitionProposal(
                         slug=slug,
                         current_state=engram.state,
                         target_state=EngramState.CANDIDATE,
-                        reason=f"usage_count={m.usage_count}, quality_score={m.quality_score}",
+                        reason=f"signals={signal_count}, quality_score={m.quality_score}",
                     ))
 
             elif engram.state == EngramState.CANDIDATE:

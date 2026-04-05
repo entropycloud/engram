@@ -50,24 +50,24 @@ def _store_with_engram(tmp_store: Path, **kwargs: object) -> tuple[EngramStore, 
 
 
 class TestCheckTransitions:
-    def test_draft_to_candidate_when_usage_gte_3_and_score_gte_05(
+    def test_draft_to_candidate_when_signals_gte_3_and_score_gte_05(
         self, tmp_store: Path
     ) -> None:
         store, _ = _store_with_engram(
             tmp_store,
             state=EngramState.DRAFT,
-            metrics=Metrics(usage_count=3, quality_score=0.5),
+            metrics=Metrics(success_count=1, relevant_count=2, quality_score=0.5),
         )
         lm = LifecycleManager(store)
         proposals = lm.check_transitions()
         assert len(proposals) == 1
         assert proposals[0].target_state == EngramState.CANDIDATE
 
-    def test_draft_stays_draft_when_usage_too_low(self, tmp_store: Path) -> None:
+    def test_draft_stays_draft_when_signals_too_low(self, tmp_store: Path) -> None:
         store, _ = _store_with_engram(
             tmp_store,
             state=EngramState.DRAFT,
-            metrics=Metrics(usage_count=2, quality_score=0.5),
+            metrics=Metrics(success_count=1, relevant_count=0, quality_score=0.5),
         )
         lm = LifecycleManager(store)
         proposals = lm.check_transitions()

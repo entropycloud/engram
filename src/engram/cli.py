@@ -709,8 +709,19 @@ def _run_review(
     # Clean up session injection file
     cleanup_session_file(store.root, sid)
 
-    # Write review result for next-session notification
-    _write_review_result(store.root, sid, report)
+    # Auto-promote engrams that meet lifecycle thresholds
+    lm = LifecycleManager(store)
+    proposals = lm.check_transitions()
+    promoted: list[str] = []
+    for prop in proposals:
+        try:
+            lm.apply_transition(prop.slug, prop.target_state, prop.reason)
+            promoted.append(f"{prop.slug} → {prop.target_state.value}")
+        except ValueError:
+            pass
+
+    # Write review result for next-session notification (include promotions)
+    _write_review_result(store.root, sid, report, promoted)
 
     if report.created:
         click.echo(f"Created: {', '.join(report.created)}")
@@ -724,12 +735,15 @@ def _run_review(
         click.echo(f"Error: {err}", err=True)
     if report.skipped:
         click.echo(f"Skipped: {report.skipped}")
-    if not (report.created or report.updated or report.evaluated):
+    if promoted:
+        click.echo(f"Promoted: {', '.join(promoted)}")
+    if not (report.created or report.updated or report.evaluated or promoted):
         click.echo("No engrams created, updated, or evaluated.")
 
 
 def _write_review_result(
-    store_root: Path, session_id: str, report: object
+    store_root: Path, session_id: str, report: object,
+    promoted: list[str] | None = None,
 ) -> None:
     """Write a review result JSON for next-session notification."""
     import json
@@ -742,6 +756,7 @@ def _write_review_result(
         "created": getattr(report, "created", []),
         "updated": getattr(report, "updated", []),
         "evaluated": getattr(report, "evaluated", []),
+        "promoted": promoted or [],
         "skipped": getattr(report, "skipped", 0),
         "errors": getattr(report, "errors", []),
     }
@@ -771,6 +786,8 @@ def _check_pending_reviews(store_root: Path) -> str:
                 parts.append(f"updated: {', '.join(data['updated'])}")
             if data.get("evaluated"):
                 parts.append(f"evaluated: {', '.join(data['evaluated'])}")
+            if data.get("promoted"):
+                parts.append(f"promoted: {', '.join(data['promoted'])}")
             if data.get("errors"):
                 parts.append(f"errors: {len(data['errors'])}")
             if parts:
