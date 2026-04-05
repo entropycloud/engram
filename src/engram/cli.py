@@ -589,10 +589,16 @@ def _fork_background_review(
     store_path: Path | None,
 ) -> None:
     """Fork a background process to run the review, then exit immediately."""
+    import shutil
     import subprocess
     import sys
 
-    cmd = [sys.executable, "-m", "engram.cli", "review", "--mode=auto"]
+    # Prefer the same Python that's running us (preserves the venv with anthropic)
+    engram_bin = shutil.which("engram")
+    if engram_bin:
+        cmd = [engram_bin, "review", "--mode=auto"]
+    else:
+        cmd = [sys.executable, "-m", "engram.cli", "review", "--mode=auto"]
     if session_id:
         cmd.extend(["--session", session_id])
     if transcript_path:
