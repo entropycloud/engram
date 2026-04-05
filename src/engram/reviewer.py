@@ -92,8 +92,8 @@ class EngramReviewer:
                 "with:\n"
                 '- "action": "evaluate"\n'
                 '- "target": "<slug>"\n'
-                '- "outcome": "success" (followed) | "override" '
-                '(ignored) | "unused" (not relevant)\n'
+                '- "outcome": "success" (was injected and helped) | "override" '
+                '(was injected but ignored) | "unused" (was injected but not relevant)\n'
                 '- "reason": "brief explanation"'
             )
             injected_section = "\n".join(lines)
@@ -118,6 +118,9 @@ Review the session above. For each piece of reusable procedural knowledge:
 1. Check if an existing engram already covers it (if so, decide "update" or "skip")
 2. If it's new knowledge, decide "create"
 3. If it's not worth capturing, decide "skip"
+4. For non-injected existing engrams whose knowledge would have been useful in this session, \
+add an "evaluate" decision with "outcome": "relevant" — this is weaker than "success" \
+(which is reserved for engrams that were actually injected and helped)
 
 ## Output Format
 Respond with a JSON object matching this schema:
@@ -129,7 +132,7 @@ Respond with a JSON object matching this schema:
       "engram": {{...}}  // For create: full Engram object
       "target": "slug",  // For update/evaluate: slug of engram
       "patch": {{...}},  // For update: patch data
-      "outcome": "success" | "override" | "unused",  // For evaluate only
+      "outcome": "success" | "override" | "unused" | "relevant",  // For evaluate only
       "reason": "why"
     }}
   ]

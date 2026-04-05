@@ -236,7 +236,7 @@ class ReviewDecision(BaseModel):
     target: str | None = None  # slug of engram to update
     patch: dict[str, Any] | None = None  # patch data
     # For evaluate:
-    outcome: Literal["success", "override", "unused"] | None = None
+    outcome: Literal["success", "override", "unused", "relevant"] | None = None
     # Common:
     reason: str = ""
 

@@ -53,7 +53,8 @@ class EngramEvaluator:
         Algorithm:
         - Rolling window of last 30 events
         - Start at 0.5 (neutral prior)
-        - success: score += 0.3 * (1 - score)
+        - success: score += 0.3 * (1 - score)  (was injected and helped)
+        - relevant: score += 0.15 * (1 - score)  (wasn't injected but would have helped)
         - override: score -= 0.5 * score
         - feedback up: score += 0.5 * (1 - score)
         - feedback down: score -= 0.5 * score
@@ -73,6 +74,8 @@ class EngramEvaluator:
         for event in recent:
             if event.event == "success":
                 score += 0.3 * (1 - score)
+            elif event.event == "relevant":
+                score += 0.15 * (1 - score)
             elif event.event == "override":
                 score -= 0.5 * score
             elif event.event == "feedback":
