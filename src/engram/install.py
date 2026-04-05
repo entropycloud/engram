@@ -246,23 +246,23 @@ def install_claude_code_integration(
     return {"created": created, "updated": updated}
 
 
-_HOOK_SRC = _PACKAGE_DIR / "scripts" / "pre-push"
+_GIT_HOOK_SRC = _PACKAGE_DIR / "scripts" / "post-commit"
 
 
 def _install_git_hook(project_path: Path, created: list[str]) -> None:
-    """Install the pre-push git hook if the project is a git repo."""
+    """Install the post-commit git hook for auto version bumping."""
     git_hooks_dir = project_path / ".git" / "hooks"
     if not git_hooks_dir.parent.exists():
         return  # Not a git repo
-    if not _HOOK_SRC.exists():
+    if not _GIT_HOOK_SRC.exists():
         return  # Script not bundled
 
-    hook_dest = git_hooks_dir / "pre-push"
+    hook_dest = git_hooks_dir / "post-commit"
     if hook_dest.exists():
         return  # Don't overwrite existing hook
 
     git_hooks_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(_HOOK_SRC, hook_dest)
+    shutil.copy2(_GIT_HOOK_SRC, hook_dest)
     hook_dest.chmod(0o755)
     created.append(str(hook_dest))
 

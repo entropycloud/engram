@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+#
+# post-commit hook: auto-increment patch version in pyproject.toml
+#
+# After each commit on main, bumps the patch version and amends the
+# commit to include it. The push then sends the correct version.
+#
+# Skips if:
+#   - Not on main branch
+#   - Version was already changed in this commit (manual bump)
+#   - SKIP_VERSION_BUMP=1 is set
+#   - Already running (prevents infinite recursion from the amend)
+#
+
+set -euo pipefail
+
+# Prevent recursion — the amend triggers another post-commit
+LOCK="/tmp/.engram-post-commit-$$"
+if [[ "${ENGRAM_POST_COMMIT_RUNNING:-}" == "1" ]]; then
+    exit 0
+fi
+export ENGRAM_POST_COMMIT_RUNNING=1
+
+# Allow skipping
+if [[ "${SKIP_VERSION_BUMP:-}" == "1" ]]; then
+    exit 0
+fi
+
+# Only bump on main
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+if [[ "$branch" != "main" ]]; then
+    exit 0
+fi
+
+PYPROJECT="pyproject.toml"
+
+# Check if pyproject.toml version was already changed in this commit
+if git diff HEAD~1..HEAD -- "$PYPROJECT" 2>/dev/null | grep -q '^+version'; then
+    exit 0
+fi
+
+# Read current version
+current=$(grep '^version' "$PYPROJECT" | head -1 | sed 's/version = "\(.*\)"/\1/')
+if [[ -z "$current" ]]; then
+    exit 0
+fi
+
+# Bump patch
+IFS='.' read -r major minor patch <<< "$current"
+new_patch=$((patch + 1))
+new_version="${major}.${minor}.${new_patch}"
+
+# Update and amend
+sed -i "s/^version = \"${current}\"/version = \"${new_version}\"/" "$PYPROJECT"
+git add "$PYPROJECT"
+git commit --amend --no-edit --no-verify >/dev/null 2>&1
+
+echo "post-commit: version bumped ${current} → ${new_version}"
