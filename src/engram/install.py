@@ -254,7 +254,32 @@ def install_claude_code_integration(
     _write_settings(settings_path, settings)
     updated.append(str(settings_path))
 
+    # 5. Install git pre-push hook for auto version bumping
+    if not global_install and project_path is not None:
+        _install_git_hook(project_path, created)
+
     return {"created": created, "updated": updated}
+
+
+_HOOK_SRC = _PACKAGE_DIR / "scripts" / "pre-push"
+
+
+def _install_git_hook(project_path: Path, created: list[str]) -> None:
+    """Install the pre-push git hook if the project is a git repo."""
+    git_hooks_dir = project_path / ".git" / "hooks"
+    if not git_hooks_dir.parent.exists():
+        return  # Not a git repo
+    if not _HOOK_SRC.exists():
+        return  # Script not bundled
+
+    hook_dest = git_hooks_dir / "pre-push"
+    if hook_dest.exists():
+        return  # Don't overwrite existing hook
+
+    git_hooks_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(_HOOK_SRC, hook_dest)
+    hook_dest.chmod(0o755)
+    created.append(str(hook_dest))
 
 
 def uninstall_claude_code_integration(

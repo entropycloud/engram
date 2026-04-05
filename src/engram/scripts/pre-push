@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+#
+# pre-push hook: auto-increment patch version in pyproject.toml
+#
+# Skips if:
+#   - Not pushing to main
+#   - Version was already changed in the current commit (manual bump)
+#   - SKIP_VERSION_BUMP=1 is set
+#
+
+set -euo pipefail
+
+# Allow skipping
+if [[ "${SKIP_VERSION_BUMP:-}" == "1" ]]; then
+    exit 0
+fi
+
+# Only bump on pushes to main
+while read -r local_ref local_sha remote_ref remote_sha; do
+    if [[ "$remote_ref" != "refs/heads/main" ]]; then
+        continue
+    fi
+
+    PYPROJECT="pyproject.toml"
+
+    # Check if pyproject.toml version was already changed in the commits being pushed
+    if git diff "$remote_sha..$local_sha" -- "$PYPROJECT" 2>/dev/null | grep -q '^+version'; then
+        # Version was manually bumped — skip auto-increment
+        exit 0
+    fi
+
+    # Read current version
+    current=$(grep '^version' "$PYPROJECT" | head -1 | sed 's/version = "\(.*\)"/\1/')
+    if [[ -z "$current" ]]; then
+        echo "pre-push: could not read version from $PYPROJECT" >&2
+        exit 0
+    fi
+
+    # Bump patch: 0.3.2 → 0.3.3
+    IFS='.' read -r major minor patch <<< "$current"
+    new_patch=$((patch + 1))
+    new_version="${major}.${minor}.${new_patch}"
+
+    # Update pyproject.toml
+    sed -i "s/^version = \"${current}\"/version = \"${new_version}\"/" "$PYPROJECT"
+
+    # Amend the last commit to include the bump
+    git add "$PYPROJECT"
+    git commit --amend --no-edit --no-verify >/dev/null 2>&1
+
+    echo "pre-push: version bumped ${current} → ${new_version}"
+done
+
+exit 0
