@@ -8,7 +8,6 @@ from pathlib import Path
 import click
 import frontmatter
 
-from engram import __version__
 from engram.evaluator import EngramEvaluator
 from engram.formatting import format_engram_detail, format_engram_table, format_engram_table_multi
 from engram.hooks import record_feedback, record_signal
@@ -49,7 +48,7 @@ def _get_store(store_path: Path | None = None) -> EngramStore:
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="engram")
+@click.version_option(package_name="engram", prog_name="engram")
 @click.option(
     "--store", "store_path", type=click.Path(path_type=Path), default=None,
     help="Override engram store path.",
