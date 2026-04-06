@@ -20,8 +20,8 @@ HOOK_CONFIG: dict[str, dict[str, list[dict[str, object]]]] = {
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "engram review --from-hook --mode=auto --background",
-                        "timeout": 5000,
+                        "command": "engram review --from-hook --mode=auto",
+                        "timeout": 30000,
                     },
                     {
                         "type": "command",
