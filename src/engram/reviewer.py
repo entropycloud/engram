@@ -61,11 +61,15 @@ class EngramReviewer:
         tool_calls = session_context.get("tool_calls", [])
         outcome = session_context.get("outcome", "unknown")
 
-        # Build engram index for dedup context
+        # Build engram index for dedup context (limited for LLM context budget)
         index = self._store.read_index()
         engram_index_lines: list[str] = []
         for slug, entry in sorted(index.engrams.items()):
             engram_index_lines.append(f"- {slug}: {entry.description}")
+        if len(engram_index_lines) > 50:
+            total = len(engram_index_lines)
+            engram_index_lines = engram_index_lines[-50:]
+            engram_index_lines.insert(0, f"(showing 50 of {total} engrams)")
         engram_index = "\n".join(engram_index_lines) if engram_index_lines else "(none)"
 
         # Format tool calls as JSON for the prompt
@@ -355,6 +359,20 @@ For "update" decisions, provide patch_type ("append", "replace_section", \
             return
 
         engram = decision.engram
+
+        # Dedup check: reject high-confidence duplicates
+        from engram.lifecycle import LifecycleManager
+
+        lm = LifecycleManager(self._store)
+        dupes = lm.check_duplicates(engram)
+        high_confidence = [d for d in dupes if d.similarity_score >= 0.7]
+        if high_confidence:
+            best = max(high_confidence, key=lambda d: d.similarity_score)
+            report.errors.append(
+                f"Skipped duplicate '{engram.name}' "
+                f"(similar to '{best.slug}', score={best.similarity_score:.2f})"
+            )
+            return
 
         # Scan before writing
         if self._scanner is not None:

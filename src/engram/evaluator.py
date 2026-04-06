@@ -10,6 +10,17 @@ from engram.models import MetricEvent
 from engram.store import EngramStore
 
 
+def _compute_streak(events: list[MetricEvent]) -> int:
+    """Compute current consecutive success streak from the end, broken by override."""
+    streak = 0
+    for event in reversed(events):
+        if event.event == "success":
+            streak += 1
+        elif event.event == "override":
+            break
+    return streak
+
+
 class EngramEvaluator:
     """Computes quality scores from metric events stored in JSONL sidecars."""
 
@@ -66,10 +77,6 @@ class EngramEvaluator:
         if not recent:
             return 0.5
 
-        usage_events = [e for e in recent if e.event == "used"]
-        if not usage_events:
-            return 0.5
-
         score = 0.5
         for event in recent:
             if event.event == "success":
@@ -85,6 +92,7 @@ class EngramEvaluator:
                     score -= 0.5 * score
 
         # Staleness decay (skipped for pinned engrams)
+        usage_events = [e for e in recent if e.event == "used"]
         if not pinned and usage_events:
             now = datetime.now(tz=UTC)
             days_since_use = (now - usage_events[-1].ts).days
@@ -109,6 +117,7 @@ class EngramEvaluator:
         engram.metrics.success_count = sum(1 for e in events if e.event == "success")
         engram.metrics.override_count = sum(1 for e in events if e.event == "override")
         engram.metrics.relevant_count = sum(1 for e in events if e.event == "relevant")
+        engram.metrics.streak = _compute_streak(events)
         if events:
             usage_events = [e for e in events if e.event == "used"]
             if usage_events:

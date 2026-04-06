@@ -70,9 +70,11 @@ class EngramSelector:
             if entry.files and not _matches_any_file_glob(context.files, entry.files):
                 continue
 
-            # Stage 4: Tag match
+            # Stage 4: Tag match (context tags OR prompt-derived tags)
             tag_score = _compute_tag_score(entry.tags, context.tags)
-            if entry.tags and tag_score < _TAG_THRESHOLD:
+            prompt_tag_score = _compute_prompt_tag_score(entry.tags, context.prompt)
+            effective_tag_score = max(tag_score, prompt_tag_score)
+            if entry.tags and effective_tag_score < _TAG_THRESHOLD and not entry.patterns:
                 continue
 
             # Stage 5: Pattern match
@@ -85,7 +87,7 @@ class EngramSelector:
             state_bonus = 1.0 if entry.state == EngramState.STABLE else 0.5
             recency_bonus = _compute_recency_bonus(engram.metrics.last_used)
             score = (
-                tag_score * _W_TAG
+                effective_tag_score * _W_TAG
                 + entry.quality_score * _W_QUALITY
                 + state_bonus * _W_STATE
                 + recency_bonus * _W_RECENCY
@@ -94,6 +96,8 @@ class EngramSelector:
             match_reasons: list[str] = []
             if tag_score > 0:
                 match_reasons.append("tag")
+            if prompt_tag_score > 0:
+                match_reasons.append("prompt_tag")
             if pattern_matched:
                 match_reasons.append("pattern")
 
@@ -208,6 +212,21 @@ def _compute_tag_score(engram_tags: list[str], context_tags: list[str]) -> float
         return 0.0
     intersection = set(engram_tags) & set(context_tags)
     return len(intersection) / len(engram_tags)
+
+
+def _compute_prompt_tag_score(engram_tags: list[str], prompt: str) -> float:
+    """Score tag relevance by matching tag words against prompt words."""
+    if not engram_tags or not prompt:
+        return 0.0
+    prompt_words = set(prompt.lower().split())
+    tag_words: set[str] = set()
+    for tag in engram_tags:
+        for word in tag.lower().split():
+            tag_words.add(word)
+    if not tag_words:
+        return 0.0
+    matched = sum(1 for tw in tag_words if tw in prompt_words)
+    return matched / len(tag_words)
 
 
 def _check_patterns(patterns: list[str], prompt: str) -> bool:

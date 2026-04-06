@@ -305,6 +305,91 @@ class TestExecuteDecisions:
         with pytest.raises(FileNotFoundError):
             store.read("unsafe-engram")
 
+    def test_create_blocks_high_similarity_duplicate(self, tmp_path: Path) -> None:
+        from engram.models import Triggers
+        from engram.reviewer import EngramReviewer
+
+        store = _make_store(tmp_path)
+        reviewer = EngramReviewer(store)
+
+        # Write an existing engram
+        store.write(_make_engram(
+            "existing-pattern",
+            description="run pytest with fixtures for database testing",
+            triggers=Triggers(tags=["python", "testing", "fixtures", "pytest"]),
+        ))
+
+        # Try to create a near-duplicate
+        new_engram = _make_engram(
+            "new-pattern-dup",
+            description="run pytest with fixtures for database testing",
+            triggers=Triggers(tags=["python", "testing", "fixtures", "mock"]),
+        )
+        output = ReviewOutput(decisions=[
+            ReviewDecision(action="create", engram=new_engram, reason="new pattern"),
+        ])
+        report = reviewer.execute_decisions(output, session_id="s1")
+
+        assert "new-pattern-dup" not in report.created
+        assert any("duplicate" in e.lower() or "similar" in e.lower() for e in report.errors)
+        with pytest.raises(FileNotFoundError):
+            store.read("new-pattern-dup")
+
+    def test_create_allows_novel_engram(self, tmp_path: Path) -> None:
+        from engram.models import Triggers
+        from engram.reviewer import EngramReviewer
+
+        store = _make_store(tmp_path)
+        reviewer = EngramReviewer(store)
+
+        # Write an existing engram with different tags/description
+        store.write(_make_engram(
+            "existing-docker",
+            description="docker container management",
+            triggers=Triggers(tags=["docker", "containers"]),
+        ))
+
+        # Create a completely different engram
+        new_engram = _make_engram(
+            "new-python-testing",
+            description="python unit testing best practices",
+            triggers=Triggers(tags=["python", "testing", "unittest"]),
+        )
+        output = ReviewOutput(decisions=[
+            ReviewDecision(action="create", engram=new_engram, reason="new pattern"),
+        ])
+        report = reviewer.execute_decisions(output, session_id="s1")
+
+        assert "new-python-testing" in report.created
+        store.read("new-python-testing")  # should not raise
+
+    def test_create_low_similarity_not_blocked(self, tmp_path: Path) -> None:
+        from engram.models import Triggers
+        from engram.reviewer import EngramReviewer
+
+        store = _make_store(tmp_path)
+        reviewer = EngramReviewer(store)
+
+        # Existing engram with some overlap but below 0.7 threshold
+        store.write(_make_engram(
+            "existing-eng",
+            description="deploy migration scripts to staging",
+            triggers=Triggers(tags=["deploy", "migration", "staging"]),
+        ))
+
+        # New engram: moderate overlap but different enough
+        new_engram = _make_engram(
+            "new-eng",
+            description="deploy docker containers to production",
+            triggers=Triggers(tags=["deploy", "docker", "production"]),
+        )
+        output = ReviewOutput(decisions=[
+            ReviewDecision(action="create", engram=new_engram, reason="new pattern"),
+        ])
+        report = reviewer.execute_decisions(output, session_id="s1")
+
+        assert "new-eng" in report.created
+
     def test_skip_decision_counted(self, tmp_path: Path) -> None:
         from engram.reviewer import EngramReviewer
 

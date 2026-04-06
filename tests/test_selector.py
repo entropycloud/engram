@@ -17,7 +17,7 @@ from engram.models import (
     Triggers,
     TrustLevel,
 )
-from engram.selector import EngramSelector
+from engram.selector import EngramSelector, _compute_prompt_tag_score
 from engram.store import EngramStore
 
 
@@ -206,14 +206,77 @@ class TestTagFilter:
         results = selector.select(ctx)
         assert any(r.slug == "no-tag-eng" for r in results)
 
-    def test_context_no_tags_with_engram_tags(self, tmp_path: Path) -> None:
-        """When context has no tags but engram has tags, tag_score=0.0 < 0.3 => filtered."""
+    def test_context_no_tags_no_prompt_with_engram_tags(self, tmp_path: Path) -> None:
+        """When context has no tags AND no prompt but engram has tags => filtered."""
         store = _make_store(tmp_path)
         store.write(_make_engram("has-tags", tags=["deploy", "migration"]))
         selector = EngramSelector(store)
-        ctx = SessionContext(tags=[])
+        ctx = SessionContext(tags=[], prompt="")
         results = selector.select(ctx)
         assert not any(r.slug == "has-tags" for r in results)
+
+    def test_prompt_matches_engram_tags(self, tmp_path: Path) -> None:
+        """Prompt words matching tag words should select the engram."""
+        store = _make_store(tmp_path)
+        store.write(_make_engram("deploy-eng", tags=["deploy", "migration"]))
+        selector = EngramSelector(store)
+        ctx = SessionContext(tags=[], prompt="I need to deploy the migration to staging")
+        results = selector.select(ctx)
+        assert any(r.slug == "deploy-eng" for r in results)
+
+    def test_prompt_partial_match_above_threshold(self, tmp_path: Path) -> None:
+        """Partial tag word overlap above threshold should select."""
+        store = _make_store(tmp_path)
+        store.write(_make_engram("py-eng", tags=["python", "testing", "pytest"]))
+        selector = EngramSelector(store)
+        # 2/3 tag words match -> 0.667 > 0.3 threshold
+        ctx = SessionContext(tags=[], prompt="how do I run pytest for this python module")
+        results = selector.select(ctx)
+        assert any(r.slug == "py-eng" for r in results)
+
+    def test_prompt_no_match_below_threshold(self, tmp_path: Path) -> None:
+        """Prompt with zero tag word overlap should filter."""
+        store = _make_store(tmp_path)
+        store.write(_make_engram("k8s-eng", tags=["docker", "kubernetes", "helm"]))
+        selector = EngramSelector(store)
+        ctx = SessionContext(tags=[], prompt="fix the CSS styling on the login page")
+        results = selector.select(ctx)
+        assert not any(r.slug == "k8s-eng" for r in results)
+
+    def test_pattern_match_not_blocked_by_empty_tags(self, tmp_path: Path) -> None:
+        """Engram with tags+patterns passes when tags don't match but patterns do."""
+        store = _make_store(tmp_path)
+        store.write(_make_engram(
+            "pattern-rescue",
+            tags=["deploy"],
+            patterns=[r"migration"],
+        ))
+        selector = EngramSelector(store)
+        ctx = SessionContext(tags=[], prompt="run migration")
+        results = selector.select(ctx)
+        assert any(r.slug == "pattern-rescue" for r in results)
+
+
+class TestComputePromptTagScore:
+    def test_full_match(self) -> None:
+        assert _compute_prompt_tag_score(["python", "testing"], "python testing is great") == 1.0
+
+    def test_partial_match(self) -> None:
+        score = _compute_prompt_tag_score(["python", "testing"], "python is great")
+        assert score == 0.5
+
+    def test_no_match(self) -> None:
+        assert _compute_prompt_tag_score(["docker", "helm"], "python testing") == 0.0
+
+    def test_empty_tags(self) -> None:
+        assert _compute_prompt_tag_score([], "python testing") == 0.0
+
+    def test_empty_prompt(self) -> None:
+        assert _compute_prompt_tag_score(["python"], "") == 0.0
+
+    def test_case_insensitive(self) -> None:
+        score = _compute_prompt_tag_score(["Python", "Testing"], "python testing")
+        assert score == 1.0
 
 
 # ---------------------------------------------------------------------------

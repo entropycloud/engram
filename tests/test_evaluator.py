@@ -185,15 +185,98 @@ class TestComputeQualityScore:
         # Check that it has at most 3 decimal places
         assert score == round(score, 3)
 
-    def test_no_usage_events_returns_neutral(self, tmp_store: Path) -> None:
-        """If there are events but no 'used' events, score is neutral."""
+    def test_no_usage_events_still_scores(self, tmp_store: Path) -> None:
+        """Success events should raise score even without 'used' events."""
         from engram.evaluator import EngramEvaluator
 
         store = _get_store(tmp_store)
         evaluator = EngramEvaluator(store)
         events = [_make_event("success"), _make_event("success")]
         score = evaluator.compute_quality_score(events)
-        assert score == 0.5
+        # Two successes: 0.5 + 0.3*0.5 = 0.65, then 0.65 + 0.3*0.35 = 0.755
+        assert score == 0.755
+
+    def test_relevant_only_events_raise_score(self, tmp_store: Path) -> None:
+        """Relevant events should raise score above 0.5 even without 'used' events."""
+        from engram.evaluator import EngramEvaluator
+
+        store = _get_store(tmp_store)
+        evaluator = EngramEvaluator(store)
+        events = [_make_event("relevant") for _ in range(3)]
+        score = evaluator.compute_quality_score(events)
+        # 0.5 + 0.15*0.5 = 0.575, 0.575 + 0.15*0.425 = 0.639, 0.639 + 0.15*0.361 = 0.693
+        assert score > 0.5
+        assert score < 0.8
+
+    def test_feedback_without_used_affects_score(self, tmp_store: Path) -> None:
+        """Feedback up should raise score even without 'used' events."""
+        from engram.evaluator import EngramEvaluator
+
+        store = _get_store(tmp_store)
+        evaluator = EngramEvaluator(store)
+        events = [_make_event("feedback", rating="up")]
+        score = evaluator.compute_quality_score(events)
+        # 0.5 + 0.5*(1-0.5) = 0.75
+        assert score == 0.75
+
+
+class TestComputeStreak:
+    """Test the streak computation algorithm."""
+
+    def test_consecutive_successes(self, tmp_store: Path) -> None:
+        from engram.evaluator import _compute_streak
+
+        events = [_make_event("success") for _ in range(5)]
+        assert _compute_streak(events) == 5
+
+    def test_broken_by_override(self, tmp_store: Path) -> None:
+        from engram.evaluator import _compute_streak
+
+        events = [
+            _make_event("success"),
+            _make_event("success"),
+            _make_event("override"),
+            _make_event("success"),
+        ]
+        assert _compute_streak(events) == 1
+
+    def test_ignores_non_breaking_events(self, tmp_store: Path) -> None:
+        from engram.evaluator import _compute_streak
+
+        events = [
+            _make_event("success"),
+            _make_event("relevant"),
+            _make_event("used"),
+            _make_event("success"),
+        ]
+        assert _compute_streak(events) == 2
+
+    def test_empty_events(self, tmp_store: Path) -> None:
+        from engram.evaluator import _compute_streak
+
+        assert _compute_streak([]) == 0
+
+    def test_no_successes(self, tmp_store: Path) -> None:
+        from engram.evaluator import _compute_streak
+
+        events = [_make_event("used"), _make_event("relevant")]
+        assert _compute_streak(events) == 0
+
+    def test_update_engram_score_sets_streak(self, tmp_store: Path) -> None:
+        from engram.evaluator import EngramEvaluator
+
+        store = _get_store(tmp_store)
+        store.write(_make_engram("test-engram"))
+        evaluator = EngramEvaluator(store)
+
+        evaluator.append_event("test-engram", _make_event("used"))
+        evaluator.append_event("test-engram", _make_event("success"))
+        evaluator.append_event("test-engram", _make_event("success"))
+        evaluator.append_event("test-engram", _make_event("success"))
+
+        evaluator.update_engram_score("test-engram")
+        engram = store.read("test-engram")
+        assert engram.metrics.streak == 3
 
 
 class TestJSONLReadWrite:
